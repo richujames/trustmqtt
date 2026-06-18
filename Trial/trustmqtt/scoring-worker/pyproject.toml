@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "scoring-worker"
+version = "0.1.0"
+description = "TrustMQTT scoring worker"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+redis = "^4.0"
+SQLAlchemy = "^1.4"
+scikit-learn = "^1.2"
+joblib = "^1.2"
+python-dotenv = "^1.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,37 @@
+version: '3.8'
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    volumes:
+      - ./mosquitto-config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./broker-plugin/build:/mosquitto/plugin:ro
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    depends_on:
+      - redis
+  redis:
+    image: redis:6-alpine
+    ports:
+      - "6379:6379"
+  scoring-worker:
+    build: ./scoring-worker
+    volumes:
+      - ./scoring-worker:/app
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DATABASE_URL=sqlite:///trustmqtt.db
+    depends_on:
+      - redis
+  postgres:
+    image: postgres:13-alpine
+    environment:
+      POSTGRES_USER: trustmqtt
+      POSTGRES_PASSWORD: trustmqtt
+    ports:
+      - "5432:5432"
+  grafana:
+    image: grafana/grafana:8.0
+    ports:
+      - "3000:3000"

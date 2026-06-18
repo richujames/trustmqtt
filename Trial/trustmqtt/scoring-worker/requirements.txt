@@ -1,0 +1,7 @@
+redis
+SQLAlchemy
+scikit-learn
+joblib
+python-dotenv
+psycopg2-binary
+pytest
