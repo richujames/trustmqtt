@@ -3,5 +3,7 @@ SQLAlchemy
 scikit-learn
 joblib
 python-dotenv
-psycopg2-binary
+pymysql
+cryptography
 pytest
+google-generativeai

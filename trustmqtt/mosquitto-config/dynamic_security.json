@@ -1,0 +1,9 @@
+{
+  "control": {
+    "enabled": true,
+    "password": "change_me"
+  },
+  "users": [],
+  "groups": [],
+  "acls": []
+}
