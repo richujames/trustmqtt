@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+venv/
+.venv/
+
+# C build artifacts
+plugin/build/
+plugin/tests/*.exe
+plugin/tests/test_ring
+plugin/tests/test_verdict_cache
+plugin/tests/test_token_bucket
+plugin/tests/test_enforce
+
+# Runtime data / secrets
+.env
+*.db
+models/
+fingerprints/
+
+# Generated eval output (keep the placeholder)
+eval/results/*
+!eval/results/.gitkeep

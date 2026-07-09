@@ -1,0 +1,76 @@
+{
+  "title": "TrustMQTT — Fleet Overview",
+  "uid": "tmq-fleet-overview",
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "annotations": {
+    "list": [
+      {
+        "name": "Fleet alarms",
+        "datasource": { "type": "postgres", "uid": "Postgres" },
+        "enable": true,
+        "iconColor": "red",
+        "target": {
+          "rawSql": "SELECT opened_ts AS time, 'fleet coordinated drift' AS text FROM incidents WHERE fleet = true AND opened_ts > now() - interval '6 hours'",
+          "format": "table"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Active clients (last 15m)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "targets": [
+        {
+          "rawSql": "SELECT count(DISTINCT client_id) FROM feature_windows WHERE window_start > now() - interval '15 minutes'",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Verdict level distribution (last 1h)",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 9, "x": 6, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "targets": [
+        {
+          "rawSql": "SELECT CASE level WHEN 0 THEN 'ALLOW' WHEN 1 THEN 'WATCH' WHEN 2 THEN 'THROTTLE' WHEN 3 THEN 'QUARANTINE' WHEN 4 THEN 'KICK' END AS level, count(*) AS count FROM verdict_history WHERE ts > now() - interval '1 hour' GROUP BY level ORDER BY level",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Trust score heatmap (client x time)",
+      "type": "heatmap",
+      "gridPos": { "h": 8, "w": 9, "x": 15, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "targets": [
+        {
+          "rawSql": "SELECT fw.window_start AS time, c.client_id, fw.trust FROM feature_windows fw JOIN clients c ON c.id = fw.client_id WHERE fw.window_start > now() - interval '6 hours' ORDER BY fw.window_start",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Fleet mean |z| timeline",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "targets": [
+        {
+          "rawSql": "SELECT window_start AS time, avg(fleet) AS fleet_component FROM feature_windows WHERE window_start > now() - interval '6 hours' GROUP BY window_start ORDER BY window_start",
+          "format": "time_series"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "title": "TrustMQTT — System Health",
+  "uid": "tmq-system-health",
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "10s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Plugin stats (dropped events / ring high-water)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "redis-datasource", "uid": "Redis" },
+      "targets": [
+        { "query": "tmq:stats:plugin", "type": "hash" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Stream consumer-group lag (tmq:events)",
+      "type": "table",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "redis-datasource", "uid": "Redis" },
+      "targets": [
+        { "query": "XINFO GROUPS tmq:events", "type": "cli" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Dead-letter queue depth (tmq:events:dead)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "redis-datasource", "uid": "Redis" },
+      "targets": [
+        { "query": "tmq:events:dead", "type": "streamLen" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Worker throughput (feature windows / minute)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
+      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('minute', window_start) AS time, count(*) AS windows_per_minute FROM feature_windows WHERE window_start > now() - interval '6 hours' GROUP BY 1 ORDER BY 1",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Model versions",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "targets": [
+        {
+          "rawSql": "SELECT cohort, trained_at, n_samples, path FROM model_versions ORDER BY trained_at DESC LIMIT 50",
+          "format": "table"
+        }
+      ]
+    }
+  ]
+}

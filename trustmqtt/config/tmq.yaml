@@ -1,0 +1,10 @@
+window_s: 60
+learning: {max_events: 2000, max_hours: 24}
+weights: {fsm: 0.45, drift: 0.35, fleet: 0.20}
+thresholds: {watch: 0.30, throttle: 0.50, quarantine: 0.70, kick: 0.85, kick_single: 0.95}
+hysteresis: {deescalate_windows: 3, margin: 0.05}
+fleet: {coordinated_fraction: 0.20, z_trigger: 2.0}
+topic_class: {numeric_suffix_regex: "^[a-z]*\\d+$"}
+redaction: {secret_topic_patterns: ["+/credentials/#", "+/keys/#"]}
+llm: {model: "meta/llama-3.1-8b-instruct", timeout_s: 10, enabled: true}
+mode: enforce            # mirrors plugin_opt_mode; worker refuses verdict writes in fingerprint mode

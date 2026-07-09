@@ -36,7 +36,7 @@ if ! command -v "$PYTHON_CMD" >/dev/null 2>&1; then
   exit 1
 fi
 
-# Python env for scoring-worker
+# Python env for tmq_worker
 "$PYTHON_CMD" -m venv venv
 
 if [ "$OS_NAME" = "Windows_NT" ] || [ "$OS_NAME" = "MINGW64_NT-"* ] || [ "$OS_NAME" = "MSYS_NT-"* ]; then
@@ -53,7 +53,7 @@ else
 fi
 
 pip install --upgrade pip
-pip install -r scoring-worker/requirements.txt
+pip install -r tmq_worker/requirements.txt -r tmq_worker/requirements-dev.txt
 
 echo "Dev environment prepared."
 echo "Run 'source $ACTIVATION_SCRIPT' if the environment is not already activated."
