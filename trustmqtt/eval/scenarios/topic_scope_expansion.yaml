@@ -1,0 +1,12 @@
+# Topic-scope expansion (spec §9.1): a compromised device starts probing
+# many new topics far faster than its baseline rate, simulating recon
+# against the broker's topic space.
+clients: 20
+duration_s: 900
+baseline_rate_hz: 1.0
+topic_template: "fleet/{client_id}/temp"
+attacks:
+  - type: topic_scope_expansion
+    start_s: 500
+    duration_s: 90
+    clients: [7]

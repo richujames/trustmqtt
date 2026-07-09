@@ -1,9 +1,0 @@
-redis
-SQLAlchemy
-scikit-learn
-joblib
-python-dotenv
-pymysql
-cryptography
-pytest
-google-generativeai

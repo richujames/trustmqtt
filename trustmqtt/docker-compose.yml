@@ -1,39 +1,92 @@
-version: '3.8'
+networks:
+  tmqnet:
+    driver: bridge
+
+volumes:
+  pgdata:
+  models:
+  fingerprints:
+
 services:
   mosquitto:
-    build: ./broker-plugin
-    volumes:
-      - ./mosquitto-config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    build:
+      context: .
+      dockerfile: docker/mosquitto/Dockerfile
     ports:
       - "1883:1883"
       - "9001:9001"
+    networks: [tmqnet]
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+
   redis:
-    image: redis:6-alpine
+    image: redis:7-alpine
     ports:
       - "6379:6379"
-  scoring-worker:
-    build: ./scoring-worker
-    volumes:
-      - ./scoring-worker:/app
+    networks: [tmqnet]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
     environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - DATABASE_URL=mysql+pymysql://trustmqtt:trustmqtt@mysql:3306/trustmqtt
-    depends_on:
-      - redis
-      - mysql
-  mysql:
-    image: mysql:8
-    environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: trustmqtt
-      MYSQL_USER: trustmqtt
-      MYSQL_PASSWORD: trustmqtt
+      POSTGRES_DB: ${POSTGRES_DB:-trustmqtt}
+      POSTGRES_USER: ${POSTGRES_USER:-trustmqtt}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trustmqtt}
     ports:
-      - "3306:3306"
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [tmqnet]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trustmqtt}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  tmq-worker:
+    build:
+      context: .
+      dockerfile: tmq_worker/Dockerfile
+    volumes:
+      - ./tmq_worker:/app/tmq_worker
+      - ./config:/app/config
+      - ./migrations:/app/migrations
+      - ./eval:/app/eval
+      - models:/app/models
+      - fingerprints:/app/fingerprints
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-trustmqtt}:${POSTGRES_PASSWORD:-trustmqtt}@postgres:5432/${POSTGRES_DB:-trustmqtt}
+      TMQ_CONFIG: /app/config/tmq.yaml
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      NVIDIA_BASE_URL: ${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      REDACTION_SECRET: ${REDACTION_SECRET:-dev-only-change-me}
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks: [tmqnet]
+
   grafana:
-    image: grafana/grafana:8.5.27
+    image: grafana/grafana:10.4.2
     ports:
       - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: redis-datasource
+      POSTGRES_DB: ${POSTGRES_DB:-trustmqtt}
+      POSTGRES_USER: ${POSTGRES_USER:-trustmqtt}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trustmqtt}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [tmqnet]

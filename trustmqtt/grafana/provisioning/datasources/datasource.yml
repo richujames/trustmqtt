@@ -1,0 +1,25 @@
+apiVersion: 1
+datasources:
+  - name: Postgres
+    uid: Postgres
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    database: ${POSTGRES_DB}
+    user: ${POSTGRES_USER}
+    isDefault: true
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+
+  # Requires the grafana-redis-datasource plugin — installed via
+  # GF_INSTALL_PLUGINS in docker-compose.yml's grafana service.
+  - name: Redis
+    uid: Redis
+    type: redis-datasource
+    access: proxy
+    url: redis://redis:6379
+    jsonData:
+      client: standalone

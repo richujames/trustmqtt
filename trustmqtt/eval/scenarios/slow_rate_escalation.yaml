@@ -1,0 +1,12 @@
+# Slow-rate escalation (spec §9.1): a device gradually increases its
+# publish rate over the attack window, designed to stay under static
+# rate-limit ACLs while still being a real behavioral drift.
+clients: 20
+duration_s: 1200
+baseline_rate_hz: 1.0
+topic_template: "fleet/{client_id}/temp"
+attacks:
+  - type: slow_rate_escalation
+    start_s: 300
+    duration_s: 600
+    clients: [12]

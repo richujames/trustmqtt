@@ -1,0 +1,73 @@
+{
+  "title": "TrustMQTT — Client Drill-down",
+  "uid": "tmq-client-drilldown",
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "time": { "from": "now-24h", "to": "now" },
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "client_id",
+        "type": "query",
+        "datasource": { "type": "postgres", "uid": "Postgres" },
+        "query": "SELECT DISTINCT client_id FROM clients ORDER BY client_id",
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Trust score + component breakdown",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "targets": [
+        {
+          "rawSql": "SELECT fw.window_start AS time, fw.trust, fw.fsm_violation, fw.drift, fw.fleet FROM feature_windows fw JOIN clients c ON c.id = fw.client_id WHERE c.client_id = '$client_id' ORDER BY fw.window_start",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Feature sparklines",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "targets": [
+        {
+          "rawSql": "SELECT fw.window_start AS time, (fw.features->>'msg_rate')::float AS msg_rate, (fw.features->>'byte_rate')::float AS byte_rate, (fw.features->>'ka_conformance')::float AS ka_conformance, (fw.features->>'topic_entropy')::float AS topic_entropy FROM feature_windows fw JOIN clients c ON c.id = fw.client_id WHERE c.client_id = '$client_id' ORDER BY fw.window_start",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Verdict history",
+      "type": "state-timeline",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "targets": [
+        {
+          "rawSql": "SELECT vh.ts AS time, vh.level, vh.reason FROM verdict_history vh JOIN clients c ON c.id = vh.client_id WHERE c.client_id = '$client_id' ORDER BY vh.ts",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "FSM-diff (novel transitions per incident)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 22 },
+      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "targets": [
+        {
+          "rawSql": "SELECT i.opened_ts, i.peak_level, i.fsm_diff FROM incidents i JOIN clients c ON c.id = i.client_id WHERE c.client_id = '$client_id' ORDER BY i.opened_ts DESC LIMIT 20",
+          "format": "table"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+# Coordinated 30-client drift (spec §9.1, §5.5): a large fraction of the
+# fleet shifts behavior (here: payload size) together in the same window,
+# simulating a botnet-style coordinated compromise that per-client scoring
+# alone would likely miss. Exercises FleetBaseline's coordinated-drift
+# alarm (spec §5.5).
+clients: 30
+duration_s: 900
+baseline_rate_hz: 1.0
+topic_template: "fleet/{client_id}/temp"
+attacks:
+  - type: coordinated_drift
+    start_s: 500
+    duration_s: 120
+    clients: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]  # 10/30 = 33% of the fleet
