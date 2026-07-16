@@ -11,6 +11,7 @@ TrustMQTT hooks a custom C plugin directly into Eclipse Mosquitto 2.1.x, streams
 
 - **Full technical spec** (schemas, thresholds, build phases, data contracts): [`trustmqtt/docs/SPEC.md`](./trustmqtt/docs/SPEC.md)
 - **This README** is the complete practical guide: what it is, how it works, how to run it, and a documented **audit + the efficiency / security / novelty improvements made in this pass** (see [§12](#12-audit-findings--improvements)).
+- **Project status** — completed work and what remains, indexed: [`WORK_PROGRESS.md`](./WORK_PROGRESS.md)
 
 ---
 
@@ -414,4 +415,4 @@ Continuous integration runs the same suites on every push and pull request via [
 
 ---
 
-*Architecture, data contracts, and build phases in full: [`trustmqtt/docs/SPEC.md`](./trustmqtt/docs/SPEC.md). The prior single-file architecture note is superseded — see [`trustmqtt/SYSTEM_ARCHITECTURE.md`](./trustmqtt/SYSTEM_ARCHITECTURE.md).*
+*Architecture, data contracts, and build phases in full: [`trustmqtt/docs/SPEC.md`](./trustmqtt/docs/SPEC.md). Project status — what's done and what remains: [`WORK_PROGRESS.md`](./WORK_PROGRESS.md).*
