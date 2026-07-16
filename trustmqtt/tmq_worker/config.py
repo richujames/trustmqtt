@@ -77,6 +77,10 @@ class TmqConfig:
     redaction: RedactionConfig = field(default_factory=RedactionConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     mode: str = "enforce"
+    # Evidence-availability–aware trust fusion (see policy.renormalize_weights).
+    # Off by default so the scoring semantics match the frozen §5.4 spec; turn
+    # on to stop cold-start / learning-phase clients being under-scored.
+    adaptive_fusion: bool = False
 
     # Env-derived, not part of tmq.yaml:
     redis_host: str = "redis"
@@ -105,6 +109,7 @@ def load_config(path: Optional[str] = None) -> TmqConfig:
         redaction=RedactionConfig(**raw.get("redaction", {})),
         llm=LLMConfig(**raw.get("llm", {})),
         mode=raw.get("mode", "enforce"),
+        adaptive_fusion=raw.get("adaptive_fusion", False),
     )
 
     cfg.redis_host = os.environ.get("REDIS_HOST", cfg.redis_host)

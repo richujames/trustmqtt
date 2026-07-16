@@ -47,11 +47,14 @@ class IncidentService:
             session.add(incident)
             session.flush()
             self._open_incident_ids[client.client_id] = incident.id
+            escalated = True
         else:
+            prev_peak = incident.peak_level
             incident.peak_level = max(incident.peak_level, int(verdict.level))
             incident.peak_score = max(incident.peak_score, trust)
             if fsm_diff:
                 incident.fsm_diff = fsm_diff
+            escalated = incident.peak_level > prev_peak
 
         summary = {
             "client_id": client.client_id,
@@ -65,14 +68,16 @@ class IncidentService:
         redacted = redact_incident_summary(summary, self.config.redaction_secret,
                                             self.config.redaction.secret_topic_patterns)
         incident.summary = redacted
-        # NOTE: regenerates the report on every update while the incident
-        # stays open, trading a few extra LLM calls for always-current
-        # reports; fine at this scale, worth batching if incident churn
-        # ever becomes a cost concern.
-        incident.report_md = generate_report(
-            redacted, self.config.nvidia_api_key, self.config.llm.model,
-            self.config.llm.timeout_s, self.config.llm.enabled,
-            base_url=self.config.nvidia_base_url,
-        )
+        # Only (re)draft the report when the incident first opens or its peak
+        # level escalates — not on every window it stays open. This keeps the
+        # narrative current for what an operator cares about (the worst the
+        # client got) while avoiding a blocking LLM call on every window of a
+        # long-running incident (spec §7.1: report must never gate scoring).
+        if escalated:
+            incident.report_md = generate_report(
+                redacted, self.config.nvidia_api_key, self.config.llm.model,
+                self.config.llm.timeout_s, self.config.llm.enabled,
+                base_url=self.config.nvidia_base_url,
+            )
         session.commit()
         return incident
