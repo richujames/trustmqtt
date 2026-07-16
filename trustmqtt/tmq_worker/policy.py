@@ -28,9 +28,46 @@ class ClientPolicyState:
     consecutive_kick_threshold: int = 0
 
 
-def compute_trust_score(fsm_violation: float, drift: float, fleet_component: float, weights) -> float:
-    """T = w_fsm*fsm_violation + w_drift*drift + w_fleet*fleet_component (spec §5.4)."""
-    return weights.fsm * fsm_violation + weights.drift * drift + weights.fleet * fleet_component
+def renormalize_weights(weights, active: dict) -> tuple[float, float, float]:
+    """Redistribute the configured fusion weights across only the signals
+    that currently carry usable evidence.
+
+    Novelty (evidence-availability–aware fusion): the static §5.4 formula
+    dilutes a client's trust score toward 0 whenever a detector has nothing
+    to say yet — most importantly a cold-start cohort whose drift model is
+    unfitted (drift ≡ 0 by design), which silently subtracts `w_drift` worth
+    of headroom from every score and delays the first WATCH/THROTTLE. Here
+    we treat trust as the confidence-weighted mean over the *active*
+    detectors, so an inactive signal neither accuses nor exonerates a client.
+    With all signals active the weights sum to 1.0 and this is identical to
+    the static formula — so it is a strict, opt-in generalization."""
+    total = 0.0
+    if active.get("fsm"):
+        total += weights.fsm
+    if active.get("drift"):
+        total += weights.drift
+    if active.get("fleet"):
+        total += weights.fleet
+    if total <= 0:
+        return weights.fsm, weights.drift, weights.fleet
+    return (
+        weights.fsm / total if active.get("fsm") else 0.0,
+        weights.drift / total if active.get("drift") else 0.0,
+        weights.fleet / total if active.get("fleet") else 0.0,
+    )
+
+
+def compute_trust_score(fsm_violation: float, drift: float, fleet_component: float,
+                        weights, active: dict | None = None) -> float:
+    """T = w_fsm*fsm_violation + w_drift*drift + w_fleet*fleet_component (spec §5.4).
+
+    Pass `active` (a {"fsm","drift","fleet"} -> bool mask) to enable
+    evidence-availability–aware fusion (see `renormalize_weights`); omit it
+    for the exact static behaviour."""
+    if active is None:
+        return weights.fsm * fsm_violation + weights.drift * drift + weights.fleet * fleet_component
+    w_fsm, w_drift, w_fleet = renormalize_weights(weights, active)
+    return w_fsm * fsm_violation + w_drift * drift + w_fleet * fleet_component
 
 
 class PolicyEngine:

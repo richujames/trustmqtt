@@ -1,5 +1,7 @@
 from tmq_worker.config import HysteresisConfig, ThresholdsConfig, WeightsConfig
-from tmq_worker.policy import PolicyEngine, VerdictLevel, compute_trust_score
+from tmq_worker.policy import (
+    PolicyEngine, VerdictLevel, compute_trust_score, renormalize_weights,
+)
 
 TH = ThresholdsConfig()  # watch=.30 throttle=.50 quarantine=.70 kick=.85 kick_single=.95
 HY = HysteresisConfig()  # deescalate_windows=3 margin=.05
@@ -11,6 +13,29 @@ def test_compute_trust_score_weighted_sum():
     assert abs(t - 0.45) < 1e-9
     t2 = compute_trust_score(fsm_violation=0.5, drift=0.5, fleet_component=0.5, weights=w)
     assert abs(t2 - 0.5) < 1e-9
+
+
+def test_adaptive_fusion_matches_static_when_all_signals_active():
+    w = WeightsConfig(fsm=0.45, drift=0.35, fleet=0.20)
+    active = {"fsm": True, "drift": True, "fleet": True}
+    static = compute_trust_score(0.6, 0.4, 0.2, weights=w)
+    adaptive = compute_trust_score(0.6, 0.4, 0.2, weights=w, active=active)
+    assert abs(static - adaptive) < 1e-9
+
+
+def test_adaptive_fusion_renormalizes_over_active_signals_on_cold_start():
+    w = WeightsConfig(fsm=0.45, drift=0.35, fleet=0.20)
+    # Drift model unfitted (cold start): drift is excluded, so a strong FSM
+    # signal is no longer diluted by the 0.35*0 drift term.
+    active = {"fsm": True, "drift": False, "fleet": True}
+    # weights renormalize to fsm=0.45/0.65, fleet=0.20/0.65.
+    w_fsm, w_drift, w_fleet = renormalize_weights(w, active)
+    assert w_drift == 0.0
+    assert abs(w_fsm - 0.45 / 0.65) < 1e-9
+    assert abs(w_fleet - 0.20 / 0.65) < 1e-9
+    static = compute_trust_score(1.0, 0.0, 0.0, weights=w)            # 0.45
+    adaptive = compute_trust_score(1.0, 0.0, 0.0, weights=w, active=active)  # ~0.692
+    assert adaptive > static
 
 
 def test_low_trust_stays_allow():

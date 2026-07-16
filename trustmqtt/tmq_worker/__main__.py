@@ -118,7 +118,14 @@ class ScoringContext:
 
             fleet_component, fleet_alarm = self.fleet.observe(client_id, feature_dict, now=window.window_start)
 
-            trust = compute_trust_score(fsm_score, drift_score, fleet_component, self.config.weights)
+            active = None
+            if self.config.adaptive_fusion:
+                # A cold-start cohort's drift model is unfitted (drift ≡ 0);
+                # excluding it from the fusion stops that 0 from diluting an
+                # otherwise-alarming FSM/fleet signal (see policy fusion notes).
+                active = {"fsm": True, "drift": drift_model.is_fitted, "fleet": True}
+            trust = compute_trust_score(fsm_score, drift_score, fleet_component,
+                                        self.config.weights, active=active)
             if drift_model.is_fitted:
                 baseline_rate = max(0.1, float(drift_model.scaler.median[FEATURE_NAMES.index("msg_rate")]))
             else:

@@ -1,5 +1,9 @@
 CC ?= gcc
-CFLAGS = -std=c11 -Wall -Wextra -I../include
+# _GNU_SOURCE (equivalently _POSIX_C_SOURCE>=200112L) is required so strict
+# -std=c11 still exposes the POSIX pthread_rwlock_* API that verdict_cache.c
+# uses; without it the build fails on modern glibc ("unknown type name
+# 'pthread_rwlock_t'").
+CFLAGS = -std=c11 -D_GNU_SOURCE -Wall -Wextra -I../include
 LDFLAGS = -lpthread
 
 .PHONY: test clean

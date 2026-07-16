@@ -74,12 +74,22 @@ class ClientFSM:
     learning_complete: bool = False
     last_symbol: Optional[str] = None
     counts: dict = field(default_factory=lambda: defaultdict(dict))
+    # Incrementally maintained set of every symbol that appears as a
+    # transition source or target. Cached here so `_vocab_size()` is O(1)
+    # on the per-event hot path instead of rebuilding a set over the whole
+    # transition matrix on every `_prob()` call (which runs per event and
+    # per top-k/novel-transition scan).
+    _vocab: set = field(default_factory=set)
 
     def _vocab_size(self) -> int:
-        symbols = set(self.counts.keys())
-        for row in self.counts.values():
-            symbols.update(row.keys())
-        return max(len(symbols), 1)
+        if not self._vocab and self.counts:
+            # Lazy rebuild for an FSM populated out-of-band (e.g. a future
+            # deserialization path); the incremental updates in observe()
+            # keep this in sync during normal operation.
+            self._vocab = set(self.counts.keys())
+            for row in self.counts.values():
+                self._vocab.update(row.keys())
+        return max(len(self._vocab), 1)
 
     def _prob(self, prev: str, cur: str) -> float:
         vocab = self._vocab_size()
@@ -117,10 +127,12 @@ class ClientFSM:
             viol = min(1.0, -math.log(p) / -math.log(P_FLOOR))
 
             row = self.counts[self.last_symbol]
+            self._vocab.add(self.last_symbol)
             if self.learning_complete:
                 for k in list(row.keys()):
                     row[k] *= (1 - DECAY_ALPHA)
             row[sym] = row.get(sym, 0.0) + 1.0
+            self._vocab.add(sym)
 
         self._maybe_finish_learning(ts)
         self.last_symbol = sym
