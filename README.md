@@ -19,7 +19,7 @@ TrustMQTT hooks a custom C plugin directly into Eclipse Mosquitto 2.1.x, streams
 
 1. [The idea](#1-the-idea)
 2. [Threat model](#2-threat-model)
-3. [Architecture](#3-architecture)
+3. [Architecture](#3-architecture) — including [**the life of a message (end to end)**](#31-the-life-of-a-message--end-to-end)
 4. [How detection works](#4-how-detection-works)
 5. [How enforcement works](#5-how-enforcement-works)
 6. [Incident reporting, redaction & the LLM](#6-incident-reporting-redaction--the-llm)
@@ -123,6 +123,82 @@ Two properties make this more than "another IDS":
 | `postgres` | `postgres:16-alpine` | audit store (source of truth) |
 | `tmq-worker` | Python 3.11 (built) | scoring, policy, incidents |
 | `grafana` | `grafana/grafana:10.4.2` | dashboards |
+
+### 3.1 The life of a message — end to end
+
+This is the single most important thing to understand about TrustMQTT: it runs **two loops at once**, at wildly different speeds, and they only meet through Redis.
+
+- **The observation loop** (slow, ~seconds): every event is copied out to the brain, which scores behavior once per 60-second window and produces a *verdict*.
+- **The enforcement loop** (fast, microseconds): every publish is checked against the *most recent verdict already in the broker's local cache*, and allowed or blocked instantly.
+
+The crucial consequence: **a message is enforced using the verdict computed from earlier behavior; the message you send *now* feeds the verdict that governs your *next* messages.** Detection is continuous but not instantaneous — that's the deliberate trade-off that keeps the broker fast.
+
+Here is exactly what happens when device `sensor-042` sends one `PUBLISH` to `plant-a/line2/temp`.
+
+```
+ sensor-042                Mosquitto + C plugin              Redis            Python worker            Postgres
+     │  PUBLISH                     │                          │                    │                     │
+     │─────────────────────────────►│ (1) ACL_CHECK: is it     │                    │                     │
+     │                              │     allowed? → consult    │                    │                     │
+     │                              │     LOCAL verdict cache   │                    │                     │
+     │        allow / deny  ◄───────│ (2) enforce (µs, no I/O)  │                    │                     │
+     │                              │ (3) MESSAGE_IN: copy       │                    │                     │
+     │                              │     metadata → ring buffer │                    │                     │
+     │                              │ (4) emitter thread ──XADD─►│  tmq:events        │                     │
+     │                              │                            │───XREADGROUP──────►│ (5) validate        │
+     │                              │                            │                    │ (6) FSM + features  │
+     │                              │                            │                    │ (7) close 60s window│
+     │                              │                            │                    │     → drift + fleet │
+     │                              │                            │                    │     → trust → verdict│
+     │                              │                            │◄──SET verdictp─────│ (8) write verdict   │
+     │                              │                            │                    │────rows───────────►│ (9) audit + incident
+     │                              │ (10) TICK: GET verdictp ──►│                    │                     │
+     │                              │      → refresh cache        │                    │                     │
+     │  next PUBLISH is enforced on the verdict fetched in (10)  │                    │                     │
+```
+
+**A. Inside the broker — microseconds, never blocks (`plugin/src/`)**
+
+1. **Authorize (`handle_acl_check`).** When `sensor-042` publishes, Mosquitto first fires `MOSQ_EVT_ACL_CHECK` (access = WRITE) to ask "is this allowed?". The plugin looks up the device in its **in-memory verdict cache** (`enforce.c → tmq_enforce_check`) — a plain hash-map read under a read-lock, **zero network I/O**:
+   - No verdict, or level ≤ WATCH → **defer** to Mosquitto's normal ACLs (the common case).
+   - **THROTTLE** → try to take one token from the device's token bucket; got one → allow, empty → **deny** this publish.
+   - **QUARANTINE / KICK** → deny unless the topic matches `tmq/quarantine/#`.
+2. **Enforce.** The plugin returns `MOSQ_ERR_PLUGIN_DEFER` (allow) or `MOSQ_ERR_ACL_DENIED` (block). In `monitor` mode it logs `TMQ-WOULD: deny …` instead of actually blocking. This whole decision is a few microseconds.
+3. **Observe (`handle_message_in`).** If allowed, `MOSQ_EVT_MESSAGE_IN` fires. The plugin extracts **only metadata** — `client_id`, `topic`, `qos`, `retain`, `payload_len`, and a few MQTT 5 properties (never the payload bytes) — serializes it to a small JSON object with cJSON, and calls `ring_push()` to drop it onto a fixed-size **ring buffer**. Then it returns *immediately*. If the ring is full it drops the event and bumps a counter (fail-open). It also updates a "last activity" timestamp used to detect a device that's silently alive.
+4. **Ship (`emitter.c`).** A **separate background thread** wakes about every 100 ms, drains up to 512 events from the ring, and pipelines them to Redis as one batch: `XADD tmq:events MAXLEN ~ 1000000 * v <json>`. If Redis is down it backs off exponentially and keeps dropping events — the broker never stalls waiting on Redis.
+
+**B. Across to the brain — sub-second (`tmq_worker/ingest.py`)**
+
+5. **Read & validate.** The worker runs `XREADGROUP GROUP tmqw … STREAMS tmq:events >` to pull new events as a **consumer group** (so multiple workers could share the load). Each event's JSON is parsed and validated against a strict schema (`TmqEvent`, via pydantic). Anything malformed is routed to a `tmq:events:dead` dead-letter stream instead of crashing the worker. Valid events are acknowledged in one batched `XACK`.
+
+**C. In the worker — scoring, per device, per 60 s window (`tmq_worker/__main__.py → ScoringContext.on_event`)**
+
+6. **Feed the two per-event stages.** Our publish is handed to:
+   - **The Behavioral Contract Engine (`fsm.py`).** The event becomes a symbol — here `PUB(plant-a/+/temp, 0)` (the numeric segment `line2` is normalized to `+`). The engine looks up how probable this symbol was, given the previous one, in the device's learned Markov model, and records a **violation score** (near 0 if habitual, near 1 if never-seen). It buffers this for the current window.
+   - **The feature accumulator (`features.py`).** The event is added to the device's current 60-second bucket: publish timestamp, topic, QoS, payload length, etc.
+7. **Close the window.** When an event arrives whose timestamp crosses the 60 s boundary (or a periodic sweep notices a device went quiet), that device's window **closes** and turns into a **21-number feature vector** (message rate, byte rate, topic entropy, QoS mix, keepalive conformance, and the window's p95 FSM violation, …). This triggers scoring (`_handle_closed_window`):
+   - **Drift** (`drift.py`): the vector is scored by that cohort's trained Isolation-Forest + One-Class-SVM models → `0..1` (or `0` if no model is trained yet — cold start).
+   - **Fleet** (`fleet.py`): the vector updates the fleet-wide running baseline; if many devices are drifting the same way at once, a coordinated alarm fires.
+   - **Fuse** (`policy.py`): `trust = 0.45·fsm + 0.35·drift + 0.20·fleet`.
+   - **Decide** (`policy.py`): the trust score maps to `ALLOW / WATCH / THROTTLE / QUARANTINE / KICK`, with **hysteresis** (escalate fast, de-escalate only after 3 calm windows) and a new-device cap at WATCH while still learning.
+8. **Publish the verdict (`verdicts.py`).** The verdict is written to Redis in one atomic transaction as two keys: a compact `tmq:verdictp:<id>` = `"level|score|expires|rate"` (the machine-readable one the plugin reads) and a human-readable hash `tmq:verdict:<id>` (for Grafana). Both expire after 120 s.
+9. **Audit & report (`storage.py`, `incidents.py`).** The feature window, the trust components, and the verdict are all written to **Postgres** as the permanent audit trail — nothing is ever enforced without a row explaining why. If the level reached THROTTLE+ (or a fleet alarm fired), an **incident** is opened: its summary is **redacted** (`redact.py` strips IPs, device IDs, secret topics) and only then sent to the LLM for a plain-English report (with a deterministic fallback).
+
+**D. The verdict travels back — and governs the *next* message**
+
+10. **Refresh (`handle_tick` → `refresh_verdicts_from_redis`).** On a timer (`MOSQ_EVT_TICK`, roughly every 500 ms) the plugin fetches the current verdicts for its connected devices (`GET tmq:verdictp:<id>`) and updates its local cache. **KICK** verdicts are executed here (`mosquitto_kick_client_by_clientid`, then demoted to QUARANTINE to contain reconnect storms). If Redis is unreachable, cached verdicts **decay one level every 60 s back toward ALLOW** — fail-open, but gradually.
+11. **Enforce next time.** The *next* publish from `sensor-042` re-enters step 1 — and now the cache may say THROTTLE, so that message gets rate-limited. This is the loop closing: behavior from ~one to a few windows ago is what governs the traffic happening now.
+
+**Latency budget (design targets):**
+
+| Hop | Time |
+|---|---|
+| Plugin authorize + enforce (steps 1–2) | < 50 µs, no blocking I/O |
+| Event reaches the worker (steps 3–5) | ≤ ~1 s |
+| Verdict reaches the plugin cache (steps 8→10) | ≤ ~1 s |
+| **Attack → first enforcement** | typically **1–2 scoring windows** |
+
+So a hijack isn't blocked on its very first packet — it's blocked once its altered behavior has moved a trust score across a threshold and the verdict has propagated back, usually within a window or two. That "time-to-mitigation" is exactly what the [eval harness](#9-setup--execution) measures.
 
 ---
 
