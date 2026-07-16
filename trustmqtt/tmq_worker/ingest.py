@@ -99,6 +99,7 @@ class Ingestor:
         results: list[tuple[str, TmqEvent]] = []
         if not resp:
             return results
+        ack_ids: list[str] = []
         for _stream_name, entries in resp:
             for entry_id, fields in entries:
                 try:
@@ -106,7 +107,11 @@ class Ingestor:
                     results.append((entry_id, evt))
                 except MalformedEvent as e:
                     self._deadletter(entry_id, fields, e.reason)
-                self.r.xack(STREAM, GROUP, entry_id)
+                ack_ids.append(entry_id)
+        # One XACK for the whole batch instead of one round-trip per entry
+        # (a 512-event batch was previously up to 512 separate ACK calls).
+        if ack_ids:
+            self.r.xack(STREAM, GROUP, *ack_ids)
         return results
 
     def _deadletter(self, entry_id: str, fields: dict, error: str):

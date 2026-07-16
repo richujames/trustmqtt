@@ -9,8 +9,10 @@ hash, spec §4.4) so running workers hot-reload it without a restart.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import time
 from collections import defaultdict
 
@@ -28,6 +30,18 @@ def _cohort_for_client(client: Client, per_client: bool) -> str:
     if per_client:
         return client.client_id
     return client.cohort or client.username or "default"
+
+
+def _cohort_filename(cohort: str) -> str:
+    """Maps an untrusted cohort label (username / client_id, both attacker-
+    controllable) onto a safe model filename. A raw cohort like
+    "../../etc/cron.d/x" would otherwise escape models_dir on save and be
+    re-loaded via pickle by every worker — an arbitrary file write + code-
+    execution sink. We keep a readable slug for operators and append a hash
+    so distinct cohorts can never collide onto the same file."""
+    slug = re.sub(r"[^A-Za-z0-9_-]", "_", cohort)[:64] or "cohort"
+    digest = hashlib.sha256(cohort.encode("utf-8")).hexdigest()[:12]
+    return f"{slug}.{digest}.pkl"
 
 
 def collect_training_data(session, per_client: bool) -> dict[str, list[list[float]]]:
@@ -64,7 +78,7 @@ def train_all(config, models_dir: str, per_client: bool = False) -> list[str]:
         model = DriftModel()
         model.fit(np.array(vectors, dtype=float))
 
-        path = os.path.join(models_dir, f"{cohort}.pkl")
+        path = os.path.join(models_dir, _cohort_filename(cohort))
         model.save(path)
 
         trained_at = time.time()
