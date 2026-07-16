@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+# The project lives in the trustmqtt/ subdirectory of the repository root.
+defaults:
+  run:
+    working-directory: trustmqtt
+
+jobs:
+  plugin-tests:
+    name: C plugin unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install C toolchain
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+
+      - name: Build & run plugin unit tests
+        # ring buffer, verdict cache, token bucket, enforcement path.
+        run: make -C plugin/tests test
+
+  worker-tests:
+    name: Python worker test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            trustmqtt/tmq_worker/requirements.txt
+            trustmqtt/tmq_worker/requirements-dev.txt
+
+      - name: Install worker dependencies
+        run: pip install -r tmq_worker/requirements.txt -r tmq_worker/requirements-dev.txt
+
+      - name: Run pytest
+        # Tests use in-memory SQLite + fakes, so no Redis/Postgres service is needed.
+        run: PYTHONPATH=. pytest tmq_worker/tests -q
+
+  compose-config:
+    name: Validate docker-compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint compose file
+        # `docker compose` (v2) ships on ubuntu-latest runners; discarding
+        # stdout keeps this portable across compose point-releases.
+        run: docker compose config > /dev/null
