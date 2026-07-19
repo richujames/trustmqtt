@@ -42,8 +42,30 @@ A clear breakdown of contributions and future work for the TrustMQTT project.
 
 ---
 
-### **Deepak / 2D0S0G6** — Documentation, DevOps & Infrastructure
+### **Deepak / 2D0S0G6** — Research, Design, Documentation & Infrastructure
 **Commits:** 8 (July 16, 2026)
+
+#### Research & Ideation
+- **Hybrid AI Architecture Design**: Conceived and validated the dual-model approach:
+  - Mathematical baseline (Scikit-Learn IsolationForest) for strict anomaly detection
+  - LLM explainability (Gemini API) for human-readable attack explanations
+  - Rationale: Combines rigor of ML with clarity of NLP for security analysts
+
+- **Zero-Trust Behavioral Identity Concept**: Defined the core philosophy of device fingerprinting:
+  - Each device has unique "behavioral DNA" (14+ feature vectors)
+  - Continuous learning and adaptation to normal patterns
+  - Instant flagging of deviations from baseline
+
+- **Flow & Data Pipeline Design**: Architected the end-to-end system flow:
+  - Non-blocking broker architecture (C plugin → Redis)
+  - Asynchronous worker processing (queue consumer → feature engineering → ML → storage)
+  - Policy enforcement feedback loop (detection → response → database logging)
+
+- **Attack Scenario Development**: Identified and modeled key MQTT attack types:
+  - Credential replay attacks
+  - Wildcard reconnaissance
+  - Firmware drift and payload tampering
+  - Behavioral signature for each attack pattern
 
 #### Documentation & Communication (July 16)
 - **README Promotion**: Moved comprehensive README to repository root for visibility
@@ -178,8 +200,8 @@ A clear breakdown of contributions and future work for the TrustMQTT project.
 
 | Person | Area | Commits | Status |
 |--------|------|---------|--------|
-| **Richu James** | Core Features & Architecture | 7 | ✅ Complete |
-| **Deepak (2D0S0G6)** | Documentation & DevOps | 8 | ✅ Complete |
+| **Richu James** | Core Features & Implementation | 7 | ✅ Complete |
+| **Deepak (2D0S0G6)** | Research, Design, Documentation & DevOps | 8 | ✅ Complete |
 | **TBD** | Testing & Validation | 0 | ⏳ Next |
 | **TBD** | Dashboard & Monitoring | 0 | ⏳ Next |
 | **TBD** | Security & Operations | 0 | ⏳ Next |
