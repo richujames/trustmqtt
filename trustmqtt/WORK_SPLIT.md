@@ -48,7 +48,7 @@ A clear breakdown of contributions and future work for the TrustMQTT project.
 #### Research & Ideation
 - **Hybrid AI Architecture Design**: Conceived and validated the dual-model approach:
   - Mathematical baseline (Scikit-Learn IsolationForest) for strict anomaly detection
-  - LLM explainability (Gemini API) for human-readable attack explanations
+  - LLM explainability (Nvida NIM API) for human-readable attack explanations
   - Rationale: Combines rigor of ML with clarity of NLP for security analysts
 
 - **Zero-Trust Behavioral Identity Concept**: Defined the core philosophy of device fingerprinting:
