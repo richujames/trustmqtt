@@ -253,8 +253,12 @@ class FeatureWindowManager:
                 acc.sub_events += 1
             else:
                 acc.unsub_events += 1
-            if "sub_count" in evt:
-                acc.sub_count_samples.append(evt["sub_count"])
+            # Pydantic model_dump() includes optional fields with a None value.
+            # Brokers such as HiveMQ cannot provide an authoritative count;
+            # absence is not a numeric sample and must not enter the delta.
+            sub_count = evt.get("sub_count")
+            if sub_count is not None:
+                acc.sub_count_samples.append(sub_count)
         elif event_type == "ka_gap":
             acc.ka_gap_seconds_sum += float(evt.get("gap_s", 0.0))
             if evt.get("keepalive"):

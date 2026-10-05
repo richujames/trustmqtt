@@ -7,7 +7,12 @@ static int g_kicked = 0;
 
 static void kick_cb(const char *client_id, void *ud)
 {
-    (void)ud;
+    tmq_verdict_cache_t *cache = ud;
+    tmq_verdict_entry_t observed;
+    /* A broker callback can re-enter the core. This would deadlock if the
+     * cache still held its write lock while invoking us. */
+    assert(verdict_cache_get(cache, client_id, &observed) == 1);
+    assert(observed.level == TMQ_VERDICT_QUARANTINE);
     if (strcmp(client_id, "dev-2") == 0) {
         g_kicked++;
     }
@@ -49,13 +54,13 @@ int main(void)
 
     /* KICK processing demotes to QUARANTINE and fires the callback once. */
     verdict_cache_upsert(&c, "dev-2", TMQ_VERDICT_KICK, 0.95, now + 120.0, 0.0, now);
-    verdict_cache_process_kicks(&c, kick_cb, NULL);
+    verdict_cache_process_kicks(&c, kick_cb, &c);
     verdict_cache_get(&c, "dev-2", &out);
     assert(out.level == TMQ_VERDICT_QUARANTINE);
     assert(g_kicked == 1);
 
     /* A second kick pass does nothing further (already demoted). */
-    verdict_cache_process_kicks(&c, kick_cb, NULL);
+    verdict_cache_process_kicks(&c, kick_cb, &c);
     assert(g_kicked == 1);
 
     verdict_cache_destroy(&c);

@@ -74,6 +74,20 @@ def test_sub_unsub_counts_and_sub_count_delta():
     assert closed.sub_count_delta == 0  # first sample 1, last sample 1
 
 
+def test_missing_subscription_counts_do_not_crash_window_close():
+    """Some broker SDKs expose subscription events but no total count."""
+    mgr = FeatureWindowManager(window_s=10.0)
+    mgr.process_event(make_evt(0.0, "subscribe", topic="a/1", sub_count=None))
+    mgr.process_event(make_evt(1.0, "unsubscribe", topic="a/1", sub_count=None))
+
+    closed = mgr.process_event(make_evt(10.0, "publish", topic="a/2"))
+
+    assert closed is not None
+    assert closed.sub_events == 1
+    assert closed.unsub_events == 1
+    assert closed.sub_count_delta == 0
+
+
 def test_empty_window_has_zeroed_ratios_not_nan():
     mgr = FeatureWindowManager(window_s=60)
     mgr.process_event(make_evt(0.0, "connect", keepalive=30))

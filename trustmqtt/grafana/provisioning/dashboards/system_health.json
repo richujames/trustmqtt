@@ -3,64 +3,780 @@
   "uid": "tmq-system-health",
   "schemaVersion": 39,
   "timezone": "browser",
-  "time": { "from": "now-6h", "to": "now" },
+  "editable": true,
+  "tags": [
+    "trustmqtt"
+  ],
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "refresh": "10s",
+  "templating": {
+    "list": [
+      {
+        "name": "bucket",
+        "label": "Time bucket",
+        "type": "interval",
+        "query": "30s,1m,5m,10m,30m,1h",
+        "current": {
+          "text": "1m",
+          "value": "1m"
+        },
+        "auto": false,
+        "refresh": 2
+      }
+    ]
+  },
   "panels": [
     {
+      "id": 10,
+      "title": "Pipeline backpressure",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false
+    },
+    {
       "id": 1,
-      "title": "Plugin stats (dropped events / ring high-water)",
+      "title": "Event stream depth",
+      "description": "XLEN of tmq:events — total events the plugin has emitted onto the stream.",
       "type": "stat",
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
-      "datasource": { "type": "redis-datasource", "uid": "Redis" },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "Redis"
+      },
       "targets": [
-        { "query": "tmq:stats:plugin", "type": "hash" }
-      ]
+        {
+          "refId": "A",
+          "type": "cli",
+          "query": "XLEN tmq:events"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 2,
-      "title": "Stream consumer-group lag (tmq:events)",
-      "type": "table",
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
-      "datasource": { "type": "redis-datasource", "uid": "Redis" },
+      "title": "Consumer lag",
+      "description": "Entries the tmqw consumer group has not yet read. Sustained non-zero lag means the worker is falling behind the broker.",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "Redis"
+      },
       "targets": [
-        { "query": "XINFO GROUPS tmq:events", "type": "cli" }
-      ]
+        {
+          "refId": "A",
+          "type": "cli",
+          "query": "EVAL \"local g=redis.call('XINFO','GROUPS',KEYS[1]); if #g==0 then return 0 end; for i=1,#g[1],2 do if g[1][i]=='lag' then return tonumber(g[1][i+1]) or 0 end end; return 0\" 1 tmq:events"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 100
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 3,
-      "title": "Dead-letter queue depth (tmq:events:dead)",
+      "title": "Pending (unacked)",
+      "description": "Entries delivered to a consumer but not yet acknowledged. A growing value points at a worker stall or crash-loop.",
       "type": "stat",
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
-      "datasource": { "type": "redis-datasource", "uid": "Redis" },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "Redis"
+      },
       "targets": [
-        { "query": "tmq:events:dead", "type": "streamLen" }
-      ]
+        {
+          "refId": "A",
+          "type": "cli",
+          "query": "EVAL \"local g=redis.call('XINFO','GROUPS',KEYS[1]); if #g==0 then return 0 end; for i=1,#g[1],2 do if g[1][i]=='pending' then return tonumber(g[1][i+1]) or 0 end end; return 0\" 1 tmq:events"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 500
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 4,
-      "title": "Worker throughput (feature windows / minute)",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 },
-      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "title": "Dead-letter depth",
+      "description": "tmq:events:dead — events the worker could not process. Any non-zero value warrants investigation.",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "Redis"
+      },
       "targets": [
         {
-          "rawSql": "SELECT date_trunc('minute', window_start) AS time, count(*) AS windows_per_minute FROM feature_windows WHERE window_start > now() - interval '6 hours' GROUP BY 1 ORDER BY 1",
-          "format": "time_series"
+          "refId": "A",
+          "type": "cli",
+          "query": "XLEN tmq:events:dead"
         }
-      ]
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "title": "Plugin events dropped",
+      "description": "dropped_events from the plugin's ring buffer — events the broker produced faster than the emitter thread could drain. Non-zero means the plugin is shedding telemetry and detection is running on incomplete data.",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 6
+      },
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "Redis"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "cli",
+          "query": "HGET tmq:stats:plugin dropped_events"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "title": "Plugin ring-buffer depth",
+      "description": "ring_size at the last stats emit. Sustained growth is the leading indicator of the drop condition above.",
+      "type": "stat",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 6
+      },
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "Redis"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "cli",
+          "query": "HGET tmq:stats:plugin ring_size"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 256
+              },
+              {
+                "color": "red",
+                "value": 1024
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 5,
-      "title": "Model versions",
-      "type": "table",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
-      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "title": "Active consumers",
+      "description": "Number of worker consumers attached to the tmqw group. Should match the number of running tmq-worker replicas; a stray extra consumer steals events from the live worker.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 12,
+        "y": 6
+      },
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "Redis"
+      },
       "targets": [
         {
-          "rawSql": "SELECT cohort, trained_at, n_samples, path FROM model_versions ORDER BY trained_at DESC LIMIT 50",
-          "format": "table"
+          "refId": "A",
+          "type": "cli",
+          "query": "EVAL \"local g=redis.call('XINFO','GROUPS',KEYS[1]); if #g==0 then return 0 end; for i=1,#g[1],2 do if g[1][i]=='consumers' then return tonumber(g[1][i+1]) or 0 end end; return 0\" 1 tmq:events"
         }
-      ]
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              },
+              {
+                "color": "#EAB839",
+                "value": 2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "title": "Active verdict keys in Redis",
+      "description": "Live tmq:verdictp:* entries — the packed verdicts the plugin's TICK refresher reads on its hot path. These expire after 120s, so this is a near-real-time count of clients under an active verdict.",
+      "type": "stat",
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 6
+      },
+      "datasource": {
+        "type": "redis-datasource",
+        "uid": "Redis"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "cli",
+          "query": "EVAL \"return #redis.call('keys', 'tmq:verdictp:*')\" 0"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 20,
+      "title": "Worker throughput",
+      "type": "row",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "collapsed": false
+    },
+    {
+      "id": 7,
+      "title": "Feature windows scored per bucket",
+      "description": "Worker processing rate. A drop to zero while clients are connected means the scoring loop has stalled.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "Postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT $__timeGroupAlias(window_start, $bucket), count(*) AS \"windows scored\" FROM feature_windows WHERE $__timeFilter(window_start) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "axisLabel": "windows"
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "title": "Verdicts written per bucket",
+      "description": "Policy-engine output rate, split by level. If windows are being scored but no verdicts appear, the worker is in fingerprint mode or refusing writes.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "Postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT $__timeGroupAlias(ts, $bucket), count(*) FILTER (WHERE level = 0) AS \"ALLOW\", count(*) FILTER (WHERE level = 1) AS \"WATCH\", count(*) FILTER (WHERE level = 2) AS \"THROTTLE\", count(*) FILTER (WHERE level = 3) AS \"QUARANTINE\", count(*) FILTER (WHERE level = 4) AS \"KICK\" FROM verdict_history WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisLabel": "verdicts"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ALLOW"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "WATCH"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "THROTTLE"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "QUARANTINE"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "KICK"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-red"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "title": "Broker sessions opened per bucket",
+      "description": "Connect rate observed by the plugin. A reconnect storm shows up here first.",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "Postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT $__timeGroupAlias(connect_ts, $bucket), count(*) AS \"connects\" FROM sessions WHERE $__timeFilter(connect_ts) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 70,
+            "axisLabel": "connects"
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "title": "Trained model versions",
+      "description": "Per-cohort drift models. If a cohort has no row here, its drift detector is unfitted and contributes 0 — evidence-availability-aware fusion redistributes its weight.",
+      "type": "table",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 21
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "Postgres"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT cohort AS \"cohort\", trained_at AS \"trained at\", n_samples AS \"samples\", path AS \"model path\" FROM model_versions ORDER BY trained_at DESC LIMIT 50"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": []
+      }
     }
   ]
 }

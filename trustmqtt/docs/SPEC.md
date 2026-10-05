@@ -1,4 +1,9 @@
-# TrustMQTT — Full Technical Specification (v2, Mosquitto 2.1.x)
+# TrustMQTT — Full Technical Specification (v2 event/policy contract)
+
+> The original callback details below describe the Mosquitto adapter. The C
+> runtime is now broker-neutral and FlashMQ is supported by a second adapter;
+> see [BROKER_ADAPTERS.md](./BROKER_ADAPTERS.md) for the portability contract,
+> capability differences, deployment commands and researched broker roadmap.
 
 **Purpose of this document:** Complete, coder-ready specification for the TrustMQTT zero-trust MQTT broker security system. Hand this to the implementer(s) as the single source of truth. All schemas, key layouts, interfaces, thresholds, and build phases are defined here.
 

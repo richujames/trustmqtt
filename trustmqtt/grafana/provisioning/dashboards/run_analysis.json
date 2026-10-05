@@ -1,0 +1,659 @@
+{
+  "title": "TrustMQTT — Run Analysis",
+  "uid": "tmq-run-analysis",
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "editable": true,
+  "tags": ["trustmqtt", "eval"],
+  "description": "Scope the time picker to a single eval/replay run. Every panel is bound to that range, so this dashboard answers: did the detector escalate, how fast, and if not — how close did it get?",
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "",
+  "annotations": {
+    "list": [
+      {
+        "name": "Incidents",
+        "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+        "enable": true,
+        "iconColor": "red",
+        "target": {
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT i.opened_ts AS time, i.closed_ts AS timeend, concat('Incident #', i.id, ' — ', coalesce(c.client_id, 'fleet')) AS title, coalesce(i.summary->>'reason', '') AS text FROM incidents i LEFT JOIN clients c ON c.id = i.client_id WHERE $__timeFilter(i.opened_ts) ORDER BY i.opened_ts"
+        }
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "bucket",
+        "label": "Time bucket",
+        "type": "interval",
+        "query": "10s,30s,1m,5m,10m",
+        "current": { "text": "30s", "value": "30s" },
+        "auto": false,
+        "refresh": 2
+      },
+      {
+        "name": "client_filter",
+        "label": "Client filter (regex)",
+        "type": "textbox",
+        "query": ".*",
+        "current": { "text": ".*", "value": ".*" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 100,
+      "title": "Run outcome",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "id": 1,
+      "title": "Run duration",
+      "description": "Wall-clock span between the first and last feature window in the selected range.",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT coalesce(extract(epoch FROM (max(window_start) - min(window_start))), 0) AS \"Duration\" FROM feature_windows WHERE $__timeFilter(window_start)"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "text" }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Clients in run",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 1 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT count(DISTINCT client_id) AS \"Clients\" FROM feature_windows WHERE $__timeFilter(window_start)"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "text" } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Windows scored",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 1 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT count(*) AS \"Windows\" FROM feature_windows WHERE $__timeFilter(window_start)"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "text" } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "Clients enforced",
+      "description": "Clients that reached THROTTLE or above — the run's mitigation count. Zero here with a known attack in range means the detector never escalated.",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 1 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT count(DISTINCT client_id) AS \"Enforced\" FROM verdict_history WHERE level >= 2 AND $__timeFilter(ts)"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "orange", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Peak trust in run",
+      "description": "Highest fused trust score any client reached. Compare against the 0.50 THROTTLE threshold — if the peak sits below it, no enforcement was possible regardless of the enforcement path working.",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 1 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT max(trust) AS \"Peak trust\" FROM feature_windows WHERE $__timeFilter(window_start)"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 3,
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.3 },
+              { "color": "orange", "value": 0.5 },
+              { "color": "red", "value": 0.7 },
+              { "color": "dark-red", "value": 0.85 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "title": "Incidents opened",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT count(*) AS \"Incidents\" FROM incidents WHERE $__timeFilter(opened_ts)"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "text", "value": null },
+              { "color": "orange", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 200,
+      "title": "Did the detector escalate?",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "collapsed": false
+    },
+    {
+      "id": 7,
+      "title": "Escalation funnel — clients reaching each level",
+      "description": "How far up the enforcement ladder the run actually got. Each bar counts distinct clients whose peak verdict reached at least that level.",
+      "type": "barchart",
+      "gridPos": { "h": 9, "w": 8, "x": 0, "y": 7 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH lv AS (SELECT unnest(ARRAY[0,1,2,3,4]) AS lvl, unnest(ARRAY['0 ALLOW+','1 WATCH+','2 THROTTLE+','3 QUARANTINE+','4 KICK']) AS label) SELECT lv.label AS level, count(DISTINCT vh.client_id) AS clients FROM lv LEFT JOIN verdict_history vh ON vh.level >= lv.lvl AND $__timeFilter(vh.ts) GROUP BY lv.lvl, lv.label ORDER BY lv.lvl"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "legend": { "showLegend": false },
+        "tooltip": { "mode": "single" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "custom": { "lineWidth": 1, "fillOpacity": 85, "axisLabel": "distinct clients" }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "title": "Trust score distribution vs thresholds",
+      "description": "Where the run's trust scores actually landed. If the mass sits left of the 0.50 THROTTLE line, the policy had no basis to enforce — a detection-sensitivity problem, not an enforcement problem.",
+      "type": "histogram",
+      "gridPos": { "h": 9, "w": 8, "x": 8, "y": 7 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT trust AS \"trust score\" FROM feature_windows WHERE trust IS NOT NULL AND $__timeFilter(window_start)"
+        }
+      ],
+      "options": {
+        "bucketSize": 0.05,
+        "legend": { "showLegend": false },
+        "combine": false
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "custom": { "lineWidth": 1, "fillOpacity": 80 },
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "orange", "value": 0.5 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "title": "Peak trust per client",
+      "description": "Per-client worst-case score for the run, ranked. Colored against the enforcement thresholds so you can see at a glance who came close to escalating.",
+      "type": "barchart",
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 7 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT c.client_id AS client, max(fw.trust) AS \"peak trust\" FROM feature_windows fw JOIN clients c ON c.id = fw.client_id WHERE fw.trust IS NOT NULL AND c.client_id ~ '$client_filter' AND $__timeFilter(fw.window_start) GROUP BY c.client_id ORDER BY 2 DESC LIMIT 25"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "legend": { "showLegend": false },
+        "tooltip": { "mode": "single" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 3,
+          "min": 0,
+          "max": 1,
+          "color": { "mode": "thresholds" },
+          "custom": { "lineWidth": 1, "fillOpacity": 85, "axisLabel": "peak trust" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.3 },
+              { "color": "orange", "value": 0.5 },
+              { "color": "red", "value": 0.7 },
+              { "color": "dark-red", "value": 0.85 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 300,
+      "title": "Timeline",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "collapsed": false
+    },
+    {
+      "id": 10,
+      "title": "Trust score per client over time",
+      "description": "Every client's fused trust across the run. Dashed lines mark the enforcement thresholds — a line crossing 0.50 should produce a THROTTLE band in the timeline below.",
+      "type": "timeseries",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 17 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT fw.window_start AS time, c.client_id AS metric, fw.trust FROM feature_windows fw JOIN clients c ON c.id = fw.client_id WHERE fw.trust IS NOT NULL AND c.client_id ~ '$client_filter' AND $__timeFilter(fw.window_start) ORDER BY fw.window_start"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc", "maxHeight": 400 }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 3,
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "auto",
+            "pointSize": 6,
+            "spanNulls": true,
+            "axisLabel": "trust score",
+            "thresholdsStyle": { "mode": "dashed" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "yellow", "value": 0.3 },
+              { "color": "orange", "value": 0.5 },
+              { "color": "red", "value": 0.7 },
+              { "color": "dark-red", "value": 0.85 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "title": "Verdict level per client over time",
+      "description": "The enforcement state actually in force, per client, across the run.",
+      "type": "state-timeline",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 27 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT vh.ts AS time, c.client_id AS metric, vh.level FROM verdict_history vh JOIN clients c ON c.id = vh.client_id WHERE c.client_id ~ '$client_filter' AND $__timeFilter(vh.ts) ORDER BY vh.ts"
+        }
+      ],
+      "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "alignValue": "left",
+        "rowHeight": 0.9,
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "ALLOW", "color": "green", "index": 0 },
+                "1": { "text": "WATCH", "color": "yellow", "index": 1 },
+                "2": { "text": "THROTTLE", "color": "orange", "index": 2 },
+                "3": { "text": "QUARANTINE", "color": "red", "index": 3 },
+                "4": { "text": "KICK", "color": "dark-red", "index": 4 }
+              }
+            }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "custom": { "lineWidth": 0, "fillOpacity": 90 }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 400,
+      "title": "Per-client detail",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 37 },
+      "collapsed": false
+    },
+    {
+      "id": 12,
+      "title": "Time to first enforcement, per client",
+      "description": "Seconds from the client's first scored window in the run to its first THROTTLE-or-above verdict. This is the dashboard analogue of the harness's mean_time_to_mitigation_s. 'never escalated' means the client stayed below THROTTLE for the whole run.",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 14, "x": 0, "y": 38 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH first_window AS (SELECT fw.client_id, min(fw.window_start) AS t0 FROM feature_windows fw WHERE $__timeFilter(fw.window_start) GROUP BY fw.client_id), first_enf AS (SELECT vh.client_id, min(vh.ts) AS t_enf FROM verdict_history vh WHERE vh.level >= 2 AND $__timeFilter(vh.ts) GROUP BY vh.client_id), peaks AS (SELECT vh.client_id, max(vh.level) AS peak_level FROM verdict_history vh WHERE $__timeFilter(vh.ts) GROUP BY vh.client_id) SELECT c.client_id AS \"client\", coalesce(p.peak_level, 0) AS \"peak level\", round(max(fw.trust)::numeric, 3) AS \"peak trust\", CASE WHEN e.t_enf IS NULL THEN NULL ELSE round(extract(epoch FROM (e.t_enf - w.t0))::numeric, 1) END AS \"time to enforce (s)\" FROM first_window w JOIN clients c ON c.id = w.client_id JOIN feature_windows fw ON fw.client_id = w.client_id AND $__timeFilter(fw.window_start) LEFT JOIN first_enf e ON e.client_id = w.client_id LEFT JOIN peaks p ON p.client_id = w.client_id WHERE c.client_id ~ '$client_filter' GROUP BY c.client_id, p.peak_level, e.t_enf, w.t0 ORDER BY 2 DESC, 3 DESC LIMIT 50"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "peak level", "desc": true }]
+      },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "filterable": true } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "peak level" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": { "text": "ALLOW", "color": "green", "index": 0 },
+                      "1": { "text": "WATCH", "color": "yellow", "index": 1 },
+                      "2": { "text": "THROTTLE", "color": "orange", "index": 2 },
+                      "3": { "text": "QUARANTINE", "color": "red", "index": 3 },
+                      "4": { "text": "KICK", "color": "dark-red", "index": 4 }
+                    }
+                  }
+                ]
+              },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "peak trust" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "green", "value": null },
+                    { "color": "yellow", "value": 0.3 },
+                    { "color": "orange", "value": 0.5 },
+                    { "color": "red", "value": 0.7 },
+                    { "color": "dark-red", "value": 0.85 }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "time to enforce (s)" },
+            "properties": [
+              { "id": "unit", "value": "s" },
+              { "id": "noValue", "value": "never escalated" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "client" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open client drill-down",
+                    "url": "/d/tmq-client-drilldown/trustmqtt-client-drill-down?var-client_id=${__value.raw}&from=${__from}&to=${__to}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 13,
+      "title": "Detector contribution to peak scores",
+      "description": "Mean of each detector signal across the run. Shows which detector is carrying the score — and which is silent (a flat 0 drift usually means an unfitted cohort model).",
+      "type": "barchart",
+      "gridPos": { "h": 10, "w": 10, "x": 14, "y": 38 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT 'fsm violation' AS detector, avg(fsm_violation) AS \"mean\", max(fsm_violation) AS \"max\" FROM feature_windows WHERE $__timeFilter(window_start) UNION ALL SELECT 'drift', avg(drift), max(drift) FROM feature_windows WHERE $__timeFilter(window_start) UNION ALL SELECT 'fleet', avg(fleet), max(fleet) FROM feature_windows WHERE $__timeFilter(window_start) UNION ALL SELECT 'trust (fused)', avg(trust), max(trust) FROM feature_windows WHERE $__timeFilter(window_start)"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "always",
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 3,
+          "min": 0,
+          "max": 1,
+          "custom": { "lineWidth": 1, "fillOpacity": 85, "axisLabel": "score" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "mean" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "max" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 14,
+      "title": "Incidents raised during run",
+      "description": "Includes the LLM-generated report_md. Client identifiers are pseudonymized by redact.py before leaving the system.",
+      "type": "table",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 48 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT i.opened_ts AS \"opened\", coalesce(c.client_id, '(fleet)') AS \"client\", i.fleet AS \"fleet-wide\", i.peak_level AS \"peak level\", round(i.peak_score::numeric, 3) AS \"peak score\", coalesce(i.summary->>'reason', '') AS \"reason\", i.report_md AS \"report\" FROM incidents i LEFT JOIN clients c ON c.id = i.client_id WHERE $__timeFilter(i.opened_ts) ORDER BY i.opened_ts DESC LIMIT 50"
+        }
+      ],
+      "options": { "showHeader": true },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "filterable": true } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "peak level" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": { "text": "ALLOW", "color": "green", "index": 0 },
+                      "1": { "text": "WATCH", "color": "yellow", "index": 1 },
+                      "2": { "text": "THROTTLE", "color": "orange", "index": 2 },
+                      "3": { "text": "QUARANTINE", "color": "red", "index": 3 },
+                      "4": { "text": "KICK", "color": "dark-red", "index": 4 }
+                    }
+                  }
+                ]
+              },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "report" },
+            "properties": [{ "id": "custom.width", "value": 500 }]
+          }
+        ]
+      }
+    }
+  ]
+}

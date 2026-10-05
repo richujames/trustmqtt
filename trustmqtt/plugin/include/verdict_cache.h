@@ -1,5 +1,5 @@
 /* verdict_cache.h — in-memory client_id -> verdict map (spec §3.5).
- * Populated by the TICK-driven refresher reading packed strings from Redis
+ * Populated by the background refresher reading packed strings from Redis
  * (§4.2), consulted synchronously by the ACL_CHECK enforcement path (§6).
  * Guarded by a single rwlock: reads (verdict_cache_get) take a read lock,
  * anything that mutates state (upsert/token-consume/decay/kick-scan) takes

@@ -9,7 +9,7 @@ import json
 from typing import Literal, Optional
 
 import redis
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, model_validator
 
 STREAM = "tmq:events"
 DEAD_STREAM = "tmq:events:dead"
@@ -18,6 +18,14 @@ GROUP = "tmqw"
 EventType = Literal[
     "connect", "disconnect", "client_offline", "publish", "subscribe",
     "unsubscribe", "auth_observe", "ka_gap", "plugin_stats",
+    # Emitted by the plugin's kick_client_cb when a KICK verdict is actually
+    # actioned against a client. This was missing from the literal, so every
+    # enforcement event the plugin ever emitted failed validation and was
+    # dead-lettered — discarding the only record that enforcement had fired.
+    # Neither downstream consumer needs to interpret it (symbol_for_event
+    # returns None; process_event ignores unrecognised types), but it must
+    # validate so it stops polluting the dead-letter stream.
+    "enforcement",
 ]
 
 
@@ -27,11 +35,26 @@ class Props(BaseModel):
     user_prop_count: Optional[int] = None
 
 
+# Events describing the plugin/broker as a whole rather than one client.
+# These legitimately carry no client_id; every other event type must have one.
+BROKER_LEVEL_EVENTS = frozenset({"plugin_stats"})
+
+
 class TmqEvent(BaseModel):
     v: int
     ts: float
     event: EventType
-    client_id: str
+    # Adapter-supplied source metadata. Optional for backward compatibility
+    # with schema-v1 fixtures and older Mosquitto plugin builds.
+    broker: Optional[str] = None
+    broker_id: Optional[str] = None
+    # Optional at the field level so broker-level events validate, then
+    # enforced per event type by the validator below. Previously this was a
+    # hard requirement, which dead-lettered every `plugin_stats` event the
+    # plugin emitted — one per emit period, forever — burying the only
+    # backpressure telemetry (dropped_events / ring_size) the plugin exposes
+    # and keeping the dead-letter depth alarm permanently lit.
+    client_id: Optional[str] = None
     username: Optional[str] = None
     ip: Optional[str] = None
     protocol: Optional[str] = None
@@ -48,6 +71,12 @@ class TmqEvent(BaseModel):
     gap_s: Optional[float] = None
     dropped_events: Optional[int] = None
     ring_size: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _client_id_required_for_client_events(self):
+        if self.event not in BROKER_LEVEL_EVENTS and not self.client_id:
+            raise ValueError(f"client_id is required for event type '{self.event}'")
+        return self
 
 
 class MalformedEvent(Exception):

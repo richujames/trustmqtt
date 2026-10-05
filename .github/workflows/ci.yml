@@ -13,6 +13,36 @@ defaults:
     working-directory: trustmqtt
 
 jobs:
+  hivemq-mqttx:
+    name: HiveMQ and MQTTX integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Test MQTTX generator
+        run: npm ci --prefix traffic-simulator/mqttx && npm test --prefix traffic-simulator/mqttx
+      - name: Build extension and traffic image
+        run: docker compose --profile hivemq --profile traffic build hivemq mqttx
+      - name: Start isolated broker and Redis
+        run: docker compose --profile hivemq up -d hivemq redis
+      - name: Install contract test dependencies
+        run: pip install redis pydantic paho-mqtt
+      - name: Verify MQTT 3 and 5 enforcement
+        run: python hivemq-extension/smoke.py
+      - name: Generate synthetic MQTTX traffic
+        run: docker compose --profile traffic run --rm mqttx --clients 2 --messages 12 --interval 50 --timeout 30
+      - name: Broker logs
+        if: always()
+        run: docker compose --profile hivemq logs --no-color hivemq redis
+      - name: Stop test services
+        if: always()
+        run: docker compose --profile hivemq down
+
   plugin-tests:
     name: C plugin unit tests
     runs-on: ubuntu-latest

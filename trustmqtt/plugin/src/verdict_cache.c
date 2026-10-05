@@ -71,6 +71,10 @@ void verdict_cache_upsert(tmq_verdict_cache_t *c, const char *client_id,
     tmq_verdict_entry_t *e = find_locked(c, client_id);
     if (!e) {
         e = calloc(1, sizeof(tmq_verdict_entry_t));
+        if (!e) {
+            pthread_rwlock_unlock(&c->lock);
+            return;
+        }
         strncpy(e->client_id, client_id, TMQ_MAX_CLIENT_ID_LEN - 1);
         e->tokens = rate * 2.0f;
         e->tokens_ts = now;
@@ -144,16 +148,38 @@ void verdict_cache_decay_pass(tmq_verdict_cache_t *c, double now)
 
 void verdict_cache_process_kicks(tmq_verdict_cache_t *c, tmq_kick_cb_t cb, void *userdata)
 {
+    if (!cb) {
+        return;
+    }
     pthread_rwlock_wrlock(&c->lock);
+    size_t count = 0;
     for (size_t i = 0; i < TMQ_VERDICT_HASH_BUCKETS; i++) {
-        tmq_verdict_entry_t *e = c->buckets[i];
-        while (e) {
-            if (e->level == TMQ_VERDICT_KICK) {
-                cb(e->client_id, userdata);
-                e->level = TMQ_VERDICT_QUARANTINE;
-            }
-            e = e->next;
+        for (tmq_verdict_entry_t *e = c->buckets[i]; e; e = e->next) {
+            if (e->level == TMQ_VERDICT_KICK) count++;
+        }
+    }
+
+    char (*client_ids)[TMQ_MAX_CLIENT_ID_LEN] =
+        count ? calloc(count, sizeof(*client_ids)) : NULL;
+    if (count && !client_ids) {
+        pthread_rwlock_unlock(&c->lock);
+        return;
+    }
+    size_t index = 0;
+    for (size_t i = 0; i < TMQ_VERDICT_HASH_BUCKETS; i++) {
+        for (tmq_verdict_entry_t *e = c->buckets[i]; e; e = e->next) {
+            if (e->level != TMQ_VERDICT_KICK) continue;
+            strncpy(client_ids[index], e->client_id, TMQ_MAX_CLIENT_ID_LEN - 1);
+            e->level = TMQ_VERDICT_QUARANTINE;
+            index++;
         }
     }
     pthread_rwlock_unlock(&c->lock);
+
+    /* Broker callbacks may re-enter TrustMQTT. Never invoke them while the
+     * verdict cache write lock is held. */
+    for (size_t i = 0; i < index; i++) {
+        cb(client_ids[i], userdata);
+    }
+    free(client_ids);
 }

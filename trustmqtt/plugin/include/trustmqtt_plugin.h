@@ -1,4 +1,4 @@
-/* trustmqtt_plugin.h — shared types/constants for the TrustMQTT Mosquitto plugin.
+/* trustmqtt_plugin.h — shared types/constants for TrustMQTT broker adapters.
  *
  * Terminology note (spec §12 rule 4): this plugin performs RESOLVED-SEMANTIC-
  * EVENT ANALYSIS (topic, QoS, retain, session state, identity, MQTT5
@@ -33,6 +33,11 @@ typedef enum {
 } tmq_verdict_level_t;
 
 typedef struct {
+    /* Adapter metadata is emitted with every event. broker_id identifies the
+     * deployment, while broker identifies the implementation (mosquitto,
+     * flashmq, ...). Keep broker_id stable across restarts. */
+    char broker[32];
+    char broker_id[64];
     char redis_host[256];
     int redis_port;
     int emit_batch_ms;

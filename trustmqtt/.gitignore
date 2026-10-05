@@ -5,6 +5,8 @@ __pycache__/
 *.egg-info/
 venv/
 .venv/
+node_modules/
+hivemq-extension/target/
 
 # C build artifacts
 plugin/build/
@@ -13,6 +15,7 @@ plugin/tests/test_ring
 plugin/tests/test_verdict_cache
 plugin/tests/test_token_bucket
 plugin/tests/test_enforce
+plugin/tests/test_core_config
 
 # Runtime data / secrets
 .env

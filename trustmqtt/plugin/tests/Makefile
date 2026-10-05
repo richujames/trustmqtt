@@ -1,4 +1,4 @@
-CC ?= gcc
+CC = gcc
 # _GNU_SOURCE (equivalently _POSIX_C_SOURCE>=200112L) is required so strict
 # -std=c11 still exposes the POSIX pthread_rwlock_* API that verdict_cache.c
 # uses; without it the build fails on modern glibc ("unknown type name
@@ -8,11 +8,12 @@ LDFLAGS = -lpthread
 
 .PHONY: test clean
 
-test: test_ring test_verdict_cache test_token_bucket test_enforce
+test: test_ring test_verdict_cache test_token_bucket test_enforce test_core_config
 	./test_ring
 	./test_verdict_cache
 	./test_token_bucket
 	./test_enforce
+	./test_core_config
 
 test_ring: test_ring.c ../src/ring.c
 	$(CC) $(CFLAGS) -o $@ test_ring.c ../src/ring.c $(LDFLAGS)
@@ -26,5 +27,8 @@ test_token_bucket: test_token_bucket.c ../src/verdict_cache.c
 test_enforce: test_enforce.c ../src/enforce.c ../src/verdict_cache.c
 	$(CC) $(CFLAGS) -o $@ test_enforce.c ../src/enforce.c ../src/verdict_cache.c $(LDFLAGS)
 
+test_core_config: test_core_config.c ../src/config.c
+	$(CC) $(CFLAGS) -o $@ test_core_config.c ../src/config.c $(LDFLAGS)
+
 clean:
-	rm -f test_ring test_verdict_cache test_token_bucket test_enforce *.exe
+	rm -f test_ring test_verdict_cache test_token_bucket test_enforce test_core_config *.exe

@@ -6,7 +6,6 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(HIREDIS REQUIRED hiredis)
-# We link the same cJSON the broker uses (see plugin/src/plugin.c for why).
 pkg_check_modules(CJSON REQUIRED libcjson)
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
@@ -33,6 +32,8 @@ endif()
 
 add_library(trustmqtt_plugin SHARED
   src/plugin.c
+  src/core.c
+  src/config.c
   src/ring.c
   src/emitter.c
   src/verdict_cache.c
@@ -52,3 +53,32 @@ set_target_properties(trustmqtt_plugin PROPERTIES
 )
 
 install(TARGETS trustmqtt_plugin DESTINATION build)
+
+# FlashMQ has a native C++ shared-object ABI. Point this at the matching
+# release headers to build the second adapter; the C core above is unchanged.
+# Example: cmake .. -DFLASHMQ_INCLUDE_DIR=/opt/flashmq/include
+if(FLASHMQ_INCLUDE_DIR)
+  enable_language(CXX)
+  add_library(trustmqtt_flashmq_plugin SHARED
+    src/flashmq_adapter.cpp
+    src/core.c
+    src/config.c
+    src/ring.c
+    src/emitter.c
+    src/verdict_cache.c
+    src/enforce.c
+  )
+  target_include_directories(trustmqtt_flashmq_plugin PRIVATE ${FLASHMQ_INCLUDE_DIR})
+  target_compile_features(trustmqtt_flashmq_plugin PRIVATE cxx_std_17)
+  target_link_libraries(trustmqtt_flashmq_plugin
+    ${HIREDIS_LIBRARIES}
+    ${CJSON_LIBRARIES}
+    OpenSSL::Crypto
+    Threads::Threads
+  )
+  set_target_properties(trustmqtt_flashmq_plugin PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "trustmqtt_flashmq_plugin"
+  )
+  install(TARGETS trustmqtt_flashmq_plugin DESTINATION build)
+endif()

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hivemq xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="config.xsd">
+  <listeners><tcp-listener><port>1883</port><bind-address>0.0.0.0</bind-address></tcp-listener></listeners>
+  <anonymous-usage-statistics><enabled>false</enabled></anonymous-usage-statistics>
+</hivemq>

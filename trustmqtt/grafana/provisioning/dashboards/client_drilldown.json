@@ -3,71 +3,603 @@
   "uid": "tmq-client-drilldown",
   "schemaVersion": 39,
   "timezone": "browser",
-  "time": { "from": "now-24h", "to": "now" },
+  "editable": true,
+  "tags": ["trustmqtt"],
+  "time": { "from": "now-6h", "to": "now" },
   "refresh": "30s",
+  "annotations": {
+    "list": [
+      {
+        "name": "Incidents for this client",
+        "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+        "enable": true,
+        "iconColor": "red",
+        "target": {
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT i.opened_ts AS time, i.closed_ts AS timeend, concat('Incident #', i.id, ' — peak level ', i.peak_level) AS title, coalesce(i.summary->>'reason', '') AS text FROM incidents i JOIN clients c ON c.id = i.client_id WHERE c.client_id = '$client_id' AND $__timeFilter(i.opened_ts) ORDER BY i.opened_ts"
+        }
+      }
+    ]
+  },
   "templating": {
     "list": [
       {
         "name": "client_id",
+        "label": "Client",
         "type": "query",
-        "datasource": { "type": "postgres", "uid": "Postgres" },
+        "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+        "definition": "SELECT DISTINCT client_id FROM clients ORDER BY client_id",
         "query": "SELECT DISTINCT client_id FROM clients ORDER BY client_id",
-        "refresh": 2
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": false,
+        "multi": false,
+        "current": {}
       }
     ]
   },
   "panels": [
     {
+      "id": 10,
+      "title": "Current posture — $client_id",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
       "id": 1,
-      "title": "Trust score + component breakdown",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
-      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "title": "Current verdict level",
+      "description": "Most recent verdict recorded for this client in range.",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 5, "x": 0, "y": 1 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
       "targets": [
         {
-          "rawSql": "SELECT fw.window_start AS time, fw.trust, fw.fsm_violation, fw.drift, fw.fleet FROM feature_windows fw JOIN clients c ON c.id = fw.client_id WHERE c.client_id = '$client_id' ORDER BY fw.window_start",
-          "format": "time_series"
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT vh.level AS \"Level\" FROM verdict_history vh JOIN clients c ON c.id = vh.client_id WHERE c.client_id = '$client_id' AND $__timeFilter(vh.ts) ORDER BY vh.ts DESC LIMIT 1"
         }
-      ]
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "ALLOW", "color": "green", "index": 0 },
+                "1": { "text": "WATCH", "color": "yellow", "index": 1 },
+                "2": { "text": "THROTTLE", "color": "orange", "index": 2 },
+                "3": { "text": "QUARANTINE", "color": "red", "index": 3 },
+                "4": { "text": "KICK", "color": "dark-red", "index": 4 }
+              }
+            }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 2,
-      "title": "Feature sparklines",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
-      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "title": "Peak trust in range",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 5, "x": 5, "y": 1 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
       "targets": [
         {
-          "rawSql": "SELECT fw.window_start AS time, (fw.features->>'msg_rate')::float AS msg_rate, (fw.features->>'byte_rate')::float AS byte_rate, (fw.features->>'ka_conformance')::float AS ka_conformance, (fw.features->>'topic_entropy')::float AS topic_entropy FROM feature_windows fw JOIN clients c ON c.id = fw.client_id WHERE c.client_id = '$client_id' ORDER BY fw.window_start",
-          "format": "time_series"
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT max(fw.trust) AS \"Peak trust\" FROM feature_windows fw JOIN clients c ON c.id = fw.client_id WHERE c.client_id = '$client_id' AND $__timeFilter(fw.window_start)"
         }
-      ]
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 3,
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.3 },
+              { "color": "orange", "value": 0.5 },
+              { "color": "red", "value": 0.7 },
+              { "color": "dark-red", "value": 0.85 }
+            ]
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 3,
-      "title": "Verdict history",
-      "type": "state-timeline",
-      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 16 },
-      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "title": "Learning complete",
+      "description": "Whether this client has finished its baseline learning period. While learning, verdicts are capped at WATCH unless trust exceeds the hard ceiling (kick_single = 0.95).",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 5, "x": 10, "y": 1 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
       "targets": [
         {
-          "rawSql": "SELECT vh.ts AS time, vh.level, vh.reason FROM verdict_history vh JOIN clients c ON c.id = vh.client_id WHERE c.client_id = '$client_id' ORDER BY vh.ts",
-          "format": "time_series"
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT CASE WHEN learning_complete THEN 1 ELSE 0 END AS \"Learning complete\" FROM clients WHERE client_id = '$client_id'"
         }
-      ]
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "LEARNING", "color": "blue", "index": 0 },
+                "1": { "text": "COMPLETE", "color": "green", "index": 1 }
+              }
+            }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 4,
-      "title": "FSM-diff (novel transitions per incident)",
-      "type": "table",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 22 },
-      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "title": "Windows scored",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 4, "x": 15, "y": 1 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
       "targets": [
         {
-          "rawSql": "SELECT i.opened_ts, i.peak_level, i.fsm_diff FROM incidents i JOIN clients c ON c.id = i.client_id WHERE c.client_id = '$client_id' ORDER BY i.opened_ts DESC LIMIT 20",
-          "format": "table"
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT count(*) AS \"Windows\" FROM feature_windows fw JOIN clients c ON c.id = fw.client_id WHERE c.client_id = '$client_id' AND $__timeFilter(fw.window_start)"
         }
-      ]
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "text" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Cohort",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 5, "x": 19, "y": 1 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT coalesce(cohort, 'unassigned') AS \"Cohort\" FROM clients WHERE client_id = '$client_id'"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "text" } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 20,
+      "title": "Trust & enforcement",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "collapsed": false
+    },
+    {
+      "id": 6,
+      "title": "Trust score + detector breakdown",
+      "description": "Fused trust (bold) against its three weighted inputs. Dashed threshold lines are the enforcement levels — where trust crosses one, the verdict timeline below should follow.",
+      "type": "timeseries",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 7 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT fw.window_start AS time, fw.trust AS \"trust (fused)\", fw.fsm_violation AS \"fsm violation\", fw.drift AS \"drift\", fw.fleet AS \"fleet\" FROM feature_windows fw JOIN clients c ON c.id = fw.client_id WHERE c.client_id = '$client_id' AND $__timeFilter(fw.window_start) ORDER BY fw.window_start"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 3,
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "auto",
+            "pointSize": 8,
+            "spanNulls": true,
+            "axisLabel": "score",
+            "thresholdsStyle": { "mode": "dashed" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "yellow", "value": 0.3 },
+              { "color": "orange", "value": 0.5 },
+              { "color": "red", "value": 0.7 },
+              { "color": "dark-red", "value": 0.85 }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "trust (fused)" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } },
+              { "id": "custom.lineWidth", "value": 3 },
+              { "id": "custom.fillOpacity", "value": 10 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "fsm violation" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "drift" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "fleet" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "title": "Verdict level timeline",
+      "description": "The enforcement level actually in force over time. Compare against the trust chart above to see hysteresis: de-escalation needs 3 consecutive windows below the band minus a 0.05 margin.",
+      "type": "state-timeline",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 17 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT vh.ts AS time, vh.level AS \"verdict level\" FROM verdict_history vh JOIN clients c ON c.id = vh.client_id WHERE c.client_id = '$client_id' AND $__timeFilter(vh.ts) ORDER BY vh.ts"
+        }
+      ],
+      "options": {
+        "mergeValues": true,
+        "showValue": "auto",
+        "alignValue": "left",
+        "rowHeight": 0.9,
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "ALLOW", "color": "green", "index": 0 },
+                "1": { "text": "WATCH", "color": "yellow", "index": 1 },
+                "2": { "text": "THROTTLE", "color": "orange", "index": 2 },
+                "3": { "text": "QUARANTINE", "color": "red", "index": 3 },
+                "4": { "text": "KICK", "color": "dark-red", "index": 4 }
+              }
+            }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "custom": { "lineWidth": 0, "fillOpacity": 90 }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 30,
+      "title": "Behavioral features",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "collapsed": false
+    },
+    {
+      "id": 8,
+      "title": "Message & byte rate",
+      "description": "Traffic volume. Plotted on separate panels from the 0–1 ratio features because the scales differ by orders of magnitude.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 24 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT fw.window_start AS time, (fw.features->>'msg_rate')::float AS \"msg/s\" FROM feature_windows fw JOIN clients c ON c.id = fw.client_id WHERE c.client_id = '$client_id' AND $__timeFilter(fw.window_start) ORDER BY fw.window_start"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "auto", "pointSize": 8, "axisLabel": "msg/s" },
+          "color": { "mode": "fixed", "fixedColor": "blue" }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "title": "Throughput (bytes/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 24 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT fw.window_start AS time, (fw.features->>'byte_rate')::float AS \"bytes/s\" FROM feature_windows fw JOIN clients c ON c.id = fw.client_id WHERE c.client_id = '$client_id' AND $__timeFilter(fw.window_start) ORDER BY fw.window_start"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "decimals": 1,
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "showPoints": "auto", "pointSize": 8, "axisLabel": "bytes/s" },
+          "color": { "mode": "fixed", "fixedColor": "purple" }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "title": "Topic behavior",
+      "description": "unique_topics and topic_entropy rise together when a client starts touching topics outside its learned scope — the credential-reuse signature.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 24 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT fw.window_start AS time, (fw.features->>'unique_topics')::float AS \"unique topics\", (fw.features->>'topic_entropy')::float AS \"topic entropy\", (fw.features->>'new_topic_ratio')::float AS \"new topic ratio\" FROM feature_windows fw JOIN clients c ON c.id = fw.client_id WHERE c.client_id = '$client_id' AND $__timeFilter(fw.window_start) ORDER BY fw.window_start"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 0, "showPoints": "auto", "pointSize": 8 }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "unique topics" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "topic entropy" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "new topic ratio" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 12,
+      "title": "Protocol conformance ratios (0–1)",
+      "description": "Keepalive conformance and QoS/retain mix. A stable device holds these near-constant; sudden movement is a strong identity signal.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT fw.window_start AS time, (fw.features->>'ka_conformance')::float AS \"keepalive conformance\", (fw.features->>'qos0_ratio')::float AS \"qos0\", (fw.features->>'qos1_ratio')::float AS \"qos1\", (fw.features->>'retain_ratio')::float AS \"retain\", (fw.features->>'silent_alive_ratio')::float AS \"silent alive\" FROM feature_windows fw JOIN clients c ON c.id = fw.client_id WHERE c.client_id = '$client_id' AND $__timeFilter(fw.window_start) ORDER BY fw.window_start"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 3,
+          "min": 0,
+          "max": 1,
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 0, "showPoints": "auto", "pointSize": 8, "axisLabel": "ratio" }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "title": "Inter-arrival timing",
+      "description": "mean_iat with std_iat as spread. Timing fingerprints are hard for an attacker to reproduce, so drift here is high-signal.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT fw.window_start AS time, (fw.features->>'mean_iat')::float AS \"mean IAT\", (fw.features->>'std_iat')::float AS \"std IAT\" FROM feature_windows fw JOIN clients c ON c.id = fw.client_id WHERE c.client_id = '$client_id' AND $__timeFilter(fw.window_start) ORDER BY fw.window_start"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 3,
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 0, "showPoints": "auto", "pointSize": 8, "axisLabel": "seconds" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "mean IAT" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "std IAT" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } },
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 40,
+      "title": "Evidence",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 40 },
+      "collapsed": false
+    },
+    {
+      "id": 14,
+      "title": "Incidents & novel FSM transitions",
+      "description": "fsm_diff lists protocol state transitions this client had never made before the incident — the explainable core of a detection.",
+      "type": "table",
+      "gridPos": { "h": 9, "w": 14, "x": 0, "y": 41 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT i.opened_ts AS \"opened\", i.closed_ts AS \"closed\", i.peak_level AS \"peak level\", round(i.peak_score::numeric, 3) AS \"peak score\", coalesce(i.summary->>'reason', '') AS \"reason\", i.fsm_diff AS \"novel transitions\" FROM incidents i JOIN clients c ON c.id = i.client_id WHERE c.client_id = '$client_id' AND $__timeFilter(i.opened_ts) ORDER BY i.opened_ts DESC LIMIT 20"
+        }
+      ],
+      "options": { "showHeader": true },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "filterable": true } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "peak level" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": { "text": "ALLOW", "color": "green", "index": 0 },
+                      "1": { "text": "WATCH", "color": "yellow", "index": 1 },
+                      "2": { "text": "THROTTLE", "color": "orange", "index": 2 },
+                      "3": { "text": "QUARANTINE", "color": "red", "index": 3 },
+                      "4": { "text": "KICK", "color": "dark-red", "index": 4 }
+                    }
+                  }
+                ]
+              },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] } }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 15,
+      "title": "Connection sessions",
+      "description": "Connect/disconnect history. Repeated reconnects with a changing keepalive or clean-session flag are a classic session-hijack tell.",
+      "type": "table",
+      "gridPos": { "h": 9, "w": 10, "x": 14, "y": 41 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT s.connect_ts AS \"connected\", s.disconnect_ts AS \"disconnected\", s.protocol AS \"proto\", s.keepalive AS \"keepalive\", s.clean_session AS \"clean\", s.ip_masked AS \"ip (masked)\" FROM sessions s JOIN clients c ON c.id = s.client_id WHERE c.client_id = '$client_id' AND $__timeFilter(s.connect_ts) ORDER BY s.connect_ts DESC LIMIT 50"
+        }
+      ],
+      "options": { "showHeader": true },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "filterable": true } },
+        "overrides": []
+      }
     }
   ]
 }

@@ -29,10 +29,14 @@ from tmq_worker.fsm import BehavioralContractEngine, build_fingerprint_doc
 from tmq_worker.incidents import IncidentService
 from tmq_worker.ingest import Ingestor
 from tmq_worker.policy import PolicyEngine, compute_trust_score
+from tmq_worker.redact import mask_ip
 from tmq_worker.storage import (
     Client, FeatureWindowRow, Fingerprint, VerdictHistory, get_engine,
     get_or_create_client, get_sessionmaker, init_db,
 )
+# `Session` in storage.py is the broker-session ORM model; aliased so it can't
+# be confused with the SQLAlchemy session factory `self.Session`.
+from tmq_worker.storage import Session as SessionRow
 from tmq_worker.verdicts import write_verdict
 
 logger = logging.getLogger("tmq_worker")
@@ -71,13 +75,84 @@ class ScoringContext:
         return self._client_username.get(client_id, "default")
 
     def on_event(self, evt: dict):
-        if evt.get("event") == "connect" and evt.get("username"):
+        event_type = evt.get("event")
+        if event_type == "connect" and evt.get("username"):
             self._client_username[evt["client_id"]] = evt["username"]
+
+        if event_type == "plugin_stats":
+            self._record_plugin_stats(evt)
+            return
+
+        if event_type in ("connect", "disconnect", "client_offline"):
+            self._record_session_event(evt)
 
         self.bce.observe(evt)
         closed = self.features.process_event(evt)
         if closed:
             self._handle_closed_window(closed)
+
+    def _record_plugin_stats(self, evt: dict):
+        """Mirrors the plugin's periodic backpressure telemetry into
+        `tmq:stats:plugin` (spec §3.3). The plugin emits these onto the event
+        stream rather than writing Redis itself (no blocking I/O on a broker
+        callback), so the worker is what lands them somewhere observable.
+        Best-effort: losing a stats sample must never disrupt scoring.
+        """
+        try:
+            self.redis.hset("tmq:stats:plugin", mapping={
+                "dropped_events": int(evt.get("dropped_events") or 0),
+                "ring_size": int(evt.get("ring_size") or 0),
+                "updated_at": float(evt.get("ts") or time.time()),
+            })
+        except Exception:
+            logger.debug("failed to record plugin stats", exc_info=True)
+
+    def _record_session_event(self, evt: dict):
+        """Persists broker session lifecycle to `sessions` (spec §7.2).
+
+        Connect/disconnect are orders of magnitude rarer than publish, so a
+        short-lived DB session per event is affordable here — unlike the
+        publish path, which is deliberately aggregated into feature windows.
+        The source IP is masked on the way in (redact.py) so the raw address
+        is never persisted.
+        """
+        client_id = evt.get("client_id")
+        if not client_id:
+            return
+        ts = datetime.datetime.fromtimestamp(
+            evt.get("ts", time.time()), datetime.timezone.utc
+        ).replace(tzinfo=None)
+
+        session = self.Session()
+        try:
+            client = get_or_create_client(session, client_id,
+                                          username=self._client_username.get(client_id))
+            if evt.get("event") == "connect":
+                session.add(SessionRow(
+                    client_id=client.id,
+                    connect_ts=ts,
+                    ip_masked=mask_ip(evt.get("ip") or "") or None,
+                    protocol=evt.get("protocol"),
+                    keepalive=evt.get("keepalive"),
+                    clean_session=evt.get("clean_session"),
+                ))
+            else:
+                # Close the most recent still-open session for this client.
+                open_row = (
+                    session.query(SessionRow)
+                    .filter(SessionRow.client_id == client.id,
+                            SessionRow.disconnect_ts.is_(None))
+                    .order_by(SessionRow.connect_ts.desc())
+                    .first()
+                )
+                if open_row is not None:
+                    open_row.disconnect_ts = ts
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.exception("failed to record session event for %s", client_id)
+        finally:
+            session.close()
 
     def sweep(self, now: float):
         for closed in self.features.sweep_stale(now):
@@ -91,6 +166,21 @@ class ScoringContext:
         session = self.Session()
         try:
             client = get_or_create_client(session, client_id, username=self._client_username.get(client_id))
+
+            # Mirror the in-memory FSM's learning state onto the client row.
+            # Without this the column stays at its `False` default forever, so
+            # any consumer reading it from Postgres (Grafana, ops queries) sees
+            # every client as permanently still-learning.
+            learning_done = not self.bce.is_learning(client_id)
+            if client.learning_complete != learning_done:
+                client.learning_complete = learning_done
+
+            # Same for the cohort the drift model is keyed on — it was only
+            # ever held in memory, leaving clients.cohort NULL on every row.
+            cohort_name = self.cohort_for(client_id)
+            if client.cohort != cohort_name:
+                client.cohort = cohort_name
+
             row = FeatureWindowRow(
                 client_id=client.id,
                 window_start=datetime.datetime.fromtimestamp(window.window_start, datetime.timezone.utc).replace(tzinfo=None),

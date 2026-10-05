@@ -6,8 +6,43 @@ volumes:
   pgdata:
   models:
   fingerprints:
+  # Persists /var/lib/grafana, which holds both Grafana's own SQLite DB and the
+  # plugins installed via GF_INSTALL_PLUGINS. Without this the entrypoint
+  # re-downloads redis-datasource from grafana.com on every single start, and a
+  # transient network failure there exits the container with code 1 — i.e. a
+  # restart could only succeed while online. With the volume it downloads once.
+  grafana-storage:
 
 services:
+  hivemq:
+    profiles: [hivemq]
+    build:
+      context: .
+      dockerfile: docker/hivemq/Dockerfile
+    ports:
+      - "1885:1883"
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TMQ_BROKER_ID: ${TMQ_BROKER_ID:-default}
+      TMQ_MODE: ${TMQ_MODE:-enforce}
+      # Explicitly scoped anonymous access for synthetic traffic only.
+      TMQ_DEMO_AUTH: "true"
+    networks: [tmqnet]
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  mqttx:
+    profiles: [traffic]
+    build:
+      context: .
+      dockerfile: docker/mqttx/Dockerfile
+    environment:
+      MQTT_HOST: ${MQTT_HOST:-hivemq}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+    networks: [tmqnet]
+
   mosquitto:
     build:
       context: .
@@ -15,6 +50,20 @@ services:
     ports:
       - "1883:1883"
       - "9001:9001"
+    networks: [tmqnet]
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Optional second broker implementation. Start explicitly with:
+  # docker compose --profile flashmq up -d --build flashmq redis postgres tmq-worker grafana
+  flashmq:
+    profiles: [flashmq]
+    build:
+      context: .
+      dockerfile: docker/flashmq/Dockerfile
+    ports:
+      - "1884:1883"
     networks: [tmqnet]
     depends_on:
       redis:
@@ -75,17 +124,23 @@ services:
     networks: [tmqnet]
 
   grafana:
-    image: grafana/grafana:10.4.2
+    # Built from docker/grafana/Dockerfile so the redis-datasource plugin is
+    # baked into the image. See that file for why GF_INSTALL_PLUGINS is not
+    # used: it phones home to grafana.com on every start and hard-fails the
+    # container when the network is unavailable.
+    build:
+      context: .
+      dockerfile: docker/grafana/Dockerfile
     ports:
       - "3000:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
-      GF_INSTALL_PLUGINS: redis-datasource
       POSTGRES_DB: ${POSTGRES_DB:-trustmqtt}
       POSTGRES_USER: ${POSTGRES_USER:-trustmqtt}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trustmqtt}
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
+      - grafana-storage:/var/lib/grafana
     depends_on:
       postgres:
         condition: service_healthy

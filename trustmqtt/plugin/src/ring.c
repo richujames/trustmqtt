@@ -59,7 +59,11 @@ size_t ring_pop_batch(tmq_ring_t *r, char **out, size_t max_items)
 
 unsigned long ring_dropped_count(const tmq_ring_t *r)
 {
-    return r->dropped;
+    tmq_ring_t *mutable_ring = (tmq_ring_t *)r;
+    pthread_mutex_lock(&mutable_ring->lock);
+    unsigned long dropped = mutable_ring->dropped;
+    pthread_mutex_unlock(&mutable_ring->lock);
+    return dropped;
 }
 
 size_t ring_size(tmq_ring_t *r)

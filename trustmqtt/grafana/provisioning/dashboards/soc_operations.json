@@ -1,0 +1,897 @@
+{
+  "title": "TrustMQTT — SOC Operations",
+  "uid": "tmq-soc-operations",
+  "schemaVersion": 39,
+  "timezone": "browser",
+  "editable": true,
+  "tags": ["trustmqtt", "soc"],
+  "description": "Primary analyst view. Executive summary at the top, then trust analytics, MQTT behaviour, anomaly detection and network health. Every panel description states what the metric means and what an abnormal value implies.",
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "1m",
+  "graphTooltip": 1,
+  "annotations": {
+    "list": [
+      {
+        "name": "Incidents",
+        "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+        "enable": true,
+        "iconColor": "red",
+        "target": {
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT i.opened_ts AS time, i.closed_ts AS timeend, concat('Incident #', i.id, ' — ', coalesce(c.client_id, 'fleet-wide')) AS title, coalesce(i.summary->>'reason', '') AS text FROM incidents i LEFT JOIN clients c ON c.id = i.client_id WHERE $__timeFilter(i.opened_ts) ORDER BY i.opened_ts"
+        }
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "bucket",
+        "label": "Resolution",
+        "type": "interval",
+        "query": "30s,1m,5m,10m,30m,1h",
+        "current": { "text": "1m", "value": "1m" },
+        "auto": false,
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1000,
+      "title": "EXECUTIVE SUMMARY",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "id": 1,
+      "title": "System Status",
+      "description": "Composite health of the detection pipeline itself. HEALTHY = the worker is scoring windows and the event backlog is drained. DEGRADED = events are backing up or scoring has stalled, which means detection is running blind even if the broker looks fine. Check the Network Health section first when this is not HEALTHY.",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 0, "y": 1 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT CASE WHEN count(*) = 0 THEN 0 ELSE 1 END AS \"status\" FROM feature_windows WHERE window_start > now() - interval '10 minutes'"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "IDLE / NO DATA", "color": "text", "index": 0 },
+                "1": { "text": "HEALTHY", "color": "green", "index": 1 }
+              }
+            }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Fleet Risk Score",
+      "description": "Mean fused anomaly score across all clients. IMPORTANT: this scale runs 0 = normal to 1 = highly anomalous — a HIGH number is BAD. Enforcement thresholds from config/tmq.yaml: 0.30 WATCH, 0.50 THROTTLE, 0.70 QUARANTINE, 0.85 KICK. Sustained fleet-wide values above 0.30 suggest either a real coordinated event or a baseline that needs retraining.",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 4, "y": 1 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT avg(trust) AS \"risk\" FROM feature_windows WHERE trust IS NOT NULL AND $__timeFilter(window_start)"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 3,
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "#EAB839", "value": 0.3 },
+              { "color": "orange", "value": 0.5 },
+              { "color": "red", "value": 0.7 },
+              { "color": "dark-red", "value": 0.85 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Active MQTT Clients",
+      "description": "Distinct client IDs that produced at least one scored feature window in the selected range. A sudden drop can mean a fleet outage or a network partition; a sudden jump can mean device cloning or an unauthorised deployment.",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 8, "y": 1 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT count(DISTINCT client_id) AS \"clients\" FROM feature_windows WHERE $__timeFilter(window_start)"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "text" } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "High-Risk Devices",
+      "description": "Clients whose peak risk score reached the THROTTLE threshold (0.50) or above in this window — i.e. the policy engine considered restricting them. Any non-zero value deserves triage: open the Anomaly Detection section below and drill into the named client.",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 12, "y": 1 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT count(DISTINCT fw.client_id) AS \"high risk\" FROM feature_windows fw WHERE fw.trust >= 0.5 AND $__timeFilter(fw.window_start)"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "Messages Processed",
+      "description": "Estimated MQTT messages observed by the broker plugin in range, derived as message-rate x window-length summed across all feature windows. Use it as a volume sanity check: near-zero while clients are connected means the plugin is not emitting telemetry.",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 16, "y": 1 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT coalesce(sum((features->>'msg_rate')::float * window_len_s), 0) AS \"messages\" FROM feature_windows WHERE $__timeFilter(window_start)"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "none",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "text" } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "title": "Broker Availability",
+      "description": "Whether the broker plugin has reported in recently. Derived from the freshness of the plugin's periodic stats heartbeat (tmq:stats:plugin). NOTE: this deployment runs a single broker; multi-broker fleet availability is not modelled by the data pipeline.",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 20, "y": 1 },
+      "datasource": { "type": "redis-datasource", "uid": "Redis" },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "cli",
+          "query": "EVAL \"local t=redis.call('HGET','tmq:stats:plugin','updated_at'); if not t then return 0 end; local now=tonumber(redis.call('TIME')[1]); if now-tonumber(t) < 60 then return 1 else return 0 end\" 0"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "NO HEARTBEAT", "color": "red", "index": 0 },
+                "1": { "text": "ONLINE", "color": "green", "index": 1 }
+              }
+            }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+
+    {
+      "id": 2000,
+      "title": "TRUST ANALYTICS",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+      "collapsed": false
+    },
+    {
+      "id": 10,
+      "title": "Risk Score Trend",
+      "description": "Fleet mean, 95th percentile and worst-case risk score over time. Dashed lines are the enforcement thresholds. Watch the p95 and max lines: a rising max with a flat mean means one device is drifting, while all three rising together suggests a fleet-wide or environmental change.",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 8 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT $__timeGroupAlias(window_start, $bucket), avg(trust) AS \"fleet mean\", percentile_cont(0.95) WITHIN GROUP (ORDER BY trust) AS \"p95\", max(trust) AS \"worst client\" FROM feature_windows WHERE trust IS NOT NULL AND $__timeFilter(window_start) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 3,
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 6,
+            "showPoints": "auto",
+            "pointSize": 7,
+            "spanNulls": true,
+            "axisLabel": "risk score (1 = anomalous)",
+            "thresholdsStyle": { "mode": "dashed" }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "#EAB839", "value": 0.3 },
+              { "color": "orange", "value": 0.5 },
+              { "color": "red", "value": 0.7 },
+              { "color": "dark-red", "value": 0.85 }
+            ]
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "fleet mean" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#5794F2" } }] },
+          { "matcher": { "id": "byName", "options": "p95" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#B877D9" } }] },
+          { "matcher": { "id": "byName", "options": "worst client" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#FF9830" } }, { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [8, 4] } }] }
+        ]
+      }
+    },
+    {
+      "id": 11,
+      "title": "Device Risk Ranking",
+      "description": "The triage queue: highest-risk devices in range, worst first. Click a client to open the per-device drill-down with the same time range preserved. Start at the top of this list during an investigation.",
+      "type": "table",
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 8 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT c.client_id AS \"device\", round(max(fw.trust)::numeric, 3) AS \"peak risk\", round(avg(fw.trust)::numeric, 3) AS \"avg risk\" FROM feature_windows fw JOIN clients c ON c.id = fw.client_id WHERE fw.trust IS NOT NULL AND $__timeFilter(fw.window_start) GROUP BY c.client_id ORDER BY 2 DESC NULLS LAST LIMIT 12"
+        }
+      ],
+      "options": { "showHeader": true, "sortBy": [{ "displayName": "peak risk", "desc": true }] },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "filterable": false } },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": ".*risk.*" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "#EAB839", "value": 0.3 }, { "color": "orange", "value": 0.5 }, { "color": "red", "value": 0.7 }, { "color": "dark-red", "value": 0.85 } ] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "device" },
+            "properties": [{ "id": "links", "value": [{ "title": "Drill into this device", "url": "/d/tmq-client-drilldown/trustmqtt-client-drill-down?var-client_id=${__value.raw}&from=${__from}&to=${__to}" }] }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 12,
+      "title": "Risk Distribution",
+      "description": "How the fleet's risk scores are spread. A healthy fleet is a single tall cluster near zero. A long right-hand tail crossing 0.50 means devices are approaching enforcement; two separate clusters usually means two device populations sharing one baseline, which is a tuning problem rather than an attack.",
+      "type": "histogram",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 17 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT trust AS \"risk score\" FROM feature_windows WHERE trust IS NOT NULL AND $__timeFilter(window_start)"
+        }
+      ],
+      "options": { "bucketSize": 0.05, "legend": { "showLegend": false }, "combine": false },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "custom": { "lineWidth": 1, "fillOpacity": 80 },
+          "color": { "mode": "fixed", "fixedColor": "#5794F2" }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "title": "Enforcement Verdicts Over Time",
+      "description": "Policy decisions actually issued, stacked by severity. ALLOW is normal traffic. Any orange/red appearing here means the system restricted a device. If WATCH is the ceiling for a known-bad device, detection sensitivity is the limiting factor, not enforcement.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 17 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT $__timeGroupAlias(ts, $bucket), count(*) FILTER (WHERE level = 0) AS \"ALLOW\", count(*) FILTER (WHERE level = 1) AS \"WATCH\", count(*) FILTER (WHERE level = 2) AS \"THROTTLE\", count(*) FILTER (WHERE level = 3) AS \"QUARANTINE\", count(*) FILTER (WHERE level = 4) AS \"KICK\" FROM verdict_history WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["sum"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 80, "stacking": { "mode": "normal", "group": "A" }, "axisLabel": "verdicts" }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "ALLOW" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byName", "options": "WATCH" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#EAB839" } }] },
+          { "matcher": { "id": "byName", "options": "THROTTLE" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] },
+          { "matcher": { "id": "byName", "options": "QUARANTINE" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+          { "matcher": { "id": "byName", "options": "KICK" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "dark-red" } }] }
+        ]
+      }
+    },
+
+    {
+      "id": 3000,
+      "title": "MQTT BEHAVIOUR",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 25 },
+      "collapsed": false
+    },
+    {
+      "id": 20,
+      "title": "Message Rate",
+      "description": "Average and peak MQTT publish rate per client. This is application-level message rate, not network packet rate. A device whose rate departs from its own learned baseline is what drives the drift detector — absolute rate alone is not suspicious.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 26 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT $__timeGroupAlias(window_start, $bucket), avg((features->>'msg_rate')::float) AS \"avg msg/s\", max((features->>'msg_rate')::float) AS \"peak msg/s\" FROM feature_windows WHERE $__timeFilter(window_start) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi" } },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 2, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "axisLabel": "msg/s" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "avg msg/s" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#5794F2" } }] },
+          { "matcher": { "id": "byName", "options": "peak msg/s" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#FF9830" } }] }
+        ]
+      }
+    },
+    {
+      "id": 21,
+      "title": "Publish / Subscribe Activity",
+      "description": "Control-plane activity: subscribe and unsubscribe events, and how many topics each client holds. Bursts of subscribe churn from a device that normally holds a stable subscription set is a classic reconnaissance or hijack signature.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 26 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT $__timeGroupAlias(window_start, $bucket), sum((features->>'sub_events')::float) AS \"subscribes\", sum((features->>'unsub_events')::float) AS \"unsubscribes\", sum((features->>'connect_events')::float) AS \"connects\" FROM feature_windows WHERE $__timeFilter(window_start) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["sum"] }, "tooltip": { "mode": "multi" } },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 70, "axisLabel": "events" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "subscribes" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#5794F2" } }] },
+          { "matcher": { "id": "byName", "options": "unsubscribes" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#B877D9" } }] },
+          { "matcher": { "id": "byName", "options": "connects" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#73BF69" } }] }
+        ]
+      }
+    },
+    {
+      "id": 22,
+      "title": "QoS Distribution",
+      "description": "Share of traffic at each MQTT quality-of-service level, averaged across clients. Most IoT fleets are overwhelmingly one QoS level. A device abruptly switching QoS is behaving unlike its own firmware and is worth a look.",
+      "type": "barchart",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 26 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT 'QoS 0' AS qos, avg((features->>'qos0_ratio')::float) AS share FROM feature_windows WHERE $__timeFilter(window_start) UNION ALL SELECT 'QoS 1', avg((features->>'qos1_ratio')::float) FROM feature_windows WHERE $__timeFilter(window_start) UNION ALL SELECT 'QoS 2', avg((features->>'qos2_ratio')::float) FROM feature_windows WHERE $__timeFilter(window_start) UNION ALL SELECT 'Retained', avg((features->>'retain_ratio')::float) FROM feature_windows WHERE $__timeFilter(window_start)"
+        }
+      ],
+      "options": { "orientation": "horizontal", "showValue": "always", "legend": { "showLegend": false }, "tooltip": { "mode": "single" } },
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "decimals": 1, "min": 0, "max": 1, "color": { "mode": "fixed", "fixedColor": "#5794F2" }, "custom": { "lineWidth": 1, "fillOpacity": 85, "axisLabel": "share of messages" } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 23,
+      "title": "Client Connection Timeline",
+      "description": "Broker sessions: when each device was connected. Gaps are disconnections. Frequent short sessions (flapping) point at an unstable device, a network problem, or repeated failed takeover attempts.",
+      "type": "state-timeline",
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 34 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT s.connect_ts AS time, c.client_id AS metric, 1 AS connected FROM sessions s JOIN clients c ON c.id = s.client_id WHERE $__timeFilter(s.connect_ts) ORDER BY s.connect_ts"
+        }
+      ],
+      "options": {
+        "mergeValues": true,
+        "showValue": "never",
+        "alignValue": "left",
+        "rowHeight": 0.9,
+        "legend": { "showLegend": false },
+        "tooltip": { "mode": "single" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [{ "type": "value", "options": { "1": { "text": "connected", "color": "green", "index": 0 } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "custom": { "lineWidth": 0, "fillOpacity": 85 }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 24,
+      "title": "Session Duration & Topic Usage",
+      "description": "Left: how long broker sessions lasted. Right: topic-scope indicators. unique_topics is how many distinct topics a device touched; new_topic_ratio is the share it had never used before. A device that has completed learning should sit near zero new topics — a spike is the topic-scope-expansion signature.",
+      "type": "table",
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 34 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT c.client_id AS \"device\", count(s.id) AS \"sessions\", round(avg(extract(epoch FROM (s.disconnect_ts - s.connect_ts)))::numeric, 1) AS \"avg duration (s)\" FROM sessions s JOIN clients c ON c.id = s.client_id WHERE $__timeFilter(s.connect_ts) GROUP BY c.client_id ORDER BY 2 DESC LIMIT 12"
+        }
+      ],
+      "options": { "showHeader": true },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "filterable": true } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "avg duration (s)" }, "properties": [{ "id": "unit", "value": "s" }, { "id": "noValue", "value": "still open" }] }
+        ]
+      }
+    },
+
+    {
+      "id": 4000,
+      "title": "ANOMALY DETECTION",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 43 },
+      "collapsed": false
+    },
+    {
+      "id": 30,
+      "title": "Suspicious Clients",
+      "description": "Devices ranked by peak risk, showing which detector drove the score. fsm = did something protocol-structurally novel. drift = departed from its own learned statistical baseline. fleet = moved differently from its peer group. Reading the dominant column tells you what KIND of anomaly it is before you open the device.",
+      "type": "table",
+      "gridPos": { "h": 9, "w": 14, "x": 0, "y": 44 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT c.client_id AS \"device\", round(max(fw.trust)::numeric,3) AS \"peak risk\", round(max(fw.fsm_violation)::numeric,3) AS \"fsm\", round(max(fw.drift)::numeric,3) AS \"drift\", round(max(fw.fleet)::numeric,3) AS \"fleet\", coalesce(max(vh.level), 0) AS \"verdict\" FROM feature_windows fw JOIN clients c ON c.id = fw.client_id LEFT JOIN verdict_history vh ON vh.client_id = fw.client_id AND $__timeFilter(vh.ts) WHERE fw.trust IS NOT NULL AND $__timeFilter(fw.window_start) GROUP BY c.client_id HAVING max(fw.trust) > 0 ORDER BY 2 DESC LIMIT 15"
+        }
+      ],
+      "options": { "showHeader": true, "sortBy": [{ "displayName": "peak risk", "desc": true }] },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "filterable": true } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "peak risk" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "#EAB839", "value": 0.3 }, { "color": "orange", "value": 0.5 }, { "color": "red", "value": 0.7 }, { "color": "dark-red", "value": 0.85 } ] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "verdict" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              { "id": "mappings", "value": [ { "type": "value", "options": { "0": { "text": "ALLOW", "color": "green", "index": 0 }, "1": { "text": "WATCH", "color": "#EAB839", "index": 1 }, "2": { "text": "THROTTLE", "color": "orange", "index": 2 }, "3": { "text": "QUARANTINE", "color": "red", "index": 3 }, "4": { "text": "KICK", "color": "dark-red", "index": 4 } } } ] },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "device" },
+            "properties": [{ "id": "links", "value": [{ "title": "Drill into this device", "url": "/d/tmq-client-drilldown/trustmqtt-client-drill-down?var-client_id=${__value.raw}&from=${__from}&to=${__to}" }] }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 31,
+      "title": "Behavioural Deviation by Detector",
+      "description": "Which detector is contributing to fleet risk right now. If drift dominates while fsm stays flat, devices are changing HOW MUCH they talk but not the SHAPE of their protocol usage — often a firmware rollout or workload change rather than an intrusion.",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 10, "x": 14, "y": 44 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT $__timeGroupAlias(window_start, $bucket), avg(fsm_violation) AS \"fsm (protocol shape)\", avg(drift) AS \"drift (own baseline)\", avg(fleet) AS \"fleet (peer group)\" FROM feature_windows WHERE $__timeFilter(window_start) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "fieldConfig": {
+        "defaults": { "unit": "none", "decimals": 3, "min": 0, "max": 1, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "axisLabel": "component score" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "fsm (protocol shape)" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#5794F2" } }] },
+          { "matcher": { "id": "byName", "options": "drift (own baseline)" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#B877D9" } }] },
+          { "matcher": { "id": "byName", "options": "fleet (peer group)" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#73BF69" } }] }
+        ]
+      }
+    },
+    {
+      "id": 32,
+      "title": "Packet Timing Anomalies",
+      "description": "Inter-arrival timing and keepalive conformance. Devices have hardware-driven timing fingerprints that are hard for an attacker to reproduce, so a jump in std_iat or a fall in keepalive conformance is high-signal even when message volume looks normal.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 53 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT $__timeGroupAlias(window_start, $bucket), avg((features->>'mean_iat')::float) AS \"mean inter-arrival (s)\", avg((features->>'std_iat')::float) AS \"timing jitter (s)\" FROM feature_windows WHERE $__timeFilter(window_start) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi" } },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "decimals": 3, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 0, "axisLabel": "seconds" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "mean inter-arrival (s)" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#5794F2" } }] },
+          { "matcher": { "id": "byName", "options": "timing jitter (s)" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#FF9830" } }] }
+        ]
+      }
+    },
+    {
+      "id": 33,
+      "title": "Unexpected Topic Access",
+      "description": "new_topic_ratio is the share of a device's messages going to topics it has never used before; topic_entropy measures how spread its traffic is across topics. Both rising together is the credential-reuse / topic-scope-expansion signature: same valid identity, different behaviour.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 53 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT $__timeGroupAlias(window_start, $bucket), max((features->>'new_topic_ratio')::float) AS \"new topic ratio (max)\", max((features->>'topic_entropy')::float) AS \"topic entropy (max)\", max((features->>'unique_topics')::float) AS \"unique topics (max)\" FROM feature_windows WHERE $__timeFilter(window_start) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi" } },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "decimals": 2, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 0 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "new topic ratio (max)" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#FF9830" } }] },
+          { "matcher": { "id": "byName", "options": "topic entropy (max)" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#B877D9" } }] },
+          { "matcher": { "id": "byName", "options": "unique topics (max)" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#5794F2" } }] }
+        ]
+      }
+    },
+    {
+      "id": 34,
+      "title": "Alert Timeline",
+      "description": "Incidents opened by the correlation engine, newest first, with the machine-generated explanation. Device identifiers in the report text are pseudonymised before leaving the system. This is your incident queue — work it top-down.",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 53 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT i.opened_ts AS \"opened\", coalesce(c.client_id, '(fleet-wide)') AS \"device\", i.peak_level AS \"peak verdict\", round(i.peak_score::numeric,3) AS \"peak risk\", coalesce(i.summary->>'reason','') AS \"detector breakdown\" FROM incidents i LEFT JOIN clients c ON c.id = i.client_id WHERE $__timeFilter(i.opened_ts) ORDER BY i.opened_ts DESC LIMIT 25"
+        }
+      ],
+      "options": { "showHeader": true },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "filterable": true } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "peak verdict" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              { "id": "mappings", "value": [ { "type": "value", "options": { "0": { "text": "ALLOW", "color": "green", "index": 0 }, "1": { "text": "WATCH", "color": "#EAB839", "index": 1 }, "2": { "text": "THROTTLE", "color": "orange", "index": 2 }, "3": { "text": "QUARANTINE", "color": "red", "index": 3 }, "4": { "text": "KICK", "color": "dark-red", "index": 4 } } } ] },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] } }
+            ]
+          }
+        ]
+      }
+    },
+
+    {
+      "id": 5000,
+      "title": "NETWORK & PIPELINE HEALTH",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 61 },
+      "collapsed": false
+    },
+    {
+      "id": 40,
+      "title": "Ingest Error Rate",
+      "description": "Events the worker could not parse, sent to the dead-letter stream. Should be flat at zero in steady state. A rising line means the broker plugin and the worker disagree about the event schema — detection is silently losing data.",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 0, "y": 62 },
+      "datasource": { "type": "redis-datasource", "uid": "Redis" },
+      "targets": [{ "refId": "A", "type": "cli", "query": "XLEN tmq:events:dead" }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "textMode": "auto" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "#EAB839", "value": 1 }] } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 41,
+      "title": "Consumer Lag",
+      "description": "Events produced by the broker that the worker has not yet read. Zero means detection is keeping up in real time. Sustained lag means verdicts are being computed on stale traffic and enforcement will react late.",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 4, "y": 62 },
+      "datasource": { "type": "redis-datasource", "uid": "Redis" },
+      "targets": [{ "refId": "A", "type": "cli", "query": "EVAL \"local g=redis.call('XINFO','GROUPS',KEYS[1]); if #g==0 then return 0 end; for i=1,#g[1],2 do if g[1][i]=='lag' then return tonumber(g[1][i+1]) or 0 end end; return 0\" 1 tmq:events" }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "textMode": "auto" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "#EAB839", "value": 100 }, { "color": "red", "value": 1000 }] } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 42,
+      "title": "Unacked Events",
+      "description": "Delivered to the worker but not yet acknowledged. A steadily growing value indicates the worker is stalled or crash-looping mid-batch.",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 8, "y": 62 },
+      "datasource": { "type": "redis-datasource", "uid": "Redis" },
+      "targets": [{ "refId": "A", "type": "cli", "query": "EVAL \"local g=redis.call('XINFO','GROUPS',KEYS[1]); if #g==0 then return 0 end; for i=1,#g[1],2 do if g[1][i]=='pending' then return tonumber(g[1][i+1]) or 0 end end; return 0\" 1 tmq:events" }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "textMode": "auto" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "#EAB839", "value": 50 }, { "color": "red", "value": 500 }] } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 43,
+      "title": "Plugin Events Dropped",
+      "description": "Telemetry the broker plugin discarded because its ring buffer filled faster than it could drain. Non-zero means detection is running on incomplete data and the fleet may be under-scored. Investigate broker load immediately.",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 12, "y": 62 },
+      "datasource": { "type": "redis-datasource", "uid": "Redis" },
+      "targets": [{ "refId": "A", "type": "cli", "query": "HGET tmq:stats:plugin dropped_events" }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "background", "graphMode": "none", "textMode": "auto" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 44,
+      "title": "Abnormal Disconnects",
+      "description": "Sessions that ended without a clean client-initiated DISCONNECT, counted from MQTT reason codes. Elevated counts point at network instability, device crashes, or enforcement kicking clients off.",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 16, "y": 62 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT count(*) AS \"abnormal\" FROM sessions WHERE disconnect_ts IS NOT NULL AND extract(epoch FROM (disconnect_ts - connect_ts)) < 5 AND $__timeFilter(connect_ts)"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "textMode": "auto" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "#EAB839", "value": 5 }, { "color": "red", "value": 20 }] } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 45,
+      "title": "Scoring Throughput",
+      "description": "Feature windows the worker scored per bucket. This is the detection pipeline's heartbeat: if it falls to zero while clients are connected, nothing is being evaluated regardless of what the broker is doing.",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 4, "x": 20, "y": 62 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT count(*) AS \"windows\" FROM feature_windows WHERE $__timeFilter(window_start)"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "none", "graphMode": "area", "textMode": "auto" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "text" } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 46,
+      "title": "Throughput (bytes/sec)",
+      "description": "Payload bytes per second observed at the broker, average and peak across clients. Compare against Message Rate: bytes rising while message count stays flat means payloads are growing, which can indicate data exfiltration staged over an existing channel.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 68 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT $__timeGroupAlias(window_start, $bucket), avg((features->>'byte_rate')::float) AS \"avg throughput\", max((features->>'byte_rate')::float) AS \"peak throughput\" FROM feature_windows WHERE $__timeFilter(window_start) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["mean", "max"] }, "tooltip": { "mode": "multi" } },
+      "fieldConfig": {
+        "defaults": { "unit": "Bps", "decimals": 1, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "axisLabel": "bytes/s" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "avg throughput" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#5794F2" } }] },
+          { "matcher": { "id": "byName", "options": "peak throughput" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "#FF9830" } }] }
+        ]
+      }
+    },
+    {
+      "id": 47,
+      "title": "Connection Activity",
+      "description": "Broker sessions opened per bucket. A spike with no matching business reason is a reconnect storm — check whether devices are being kicked, whether the broker restarted, or whether something is attempting repeated takeovers.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 68 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT $__timeGroupAlias(connect_ts, $bucket), count(*) AS \"sessions opened\" FROM sessions WHERE $__timeFilter(connect_ts) GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": ["sum"] }, "tooltip": { "mode": "multi" } },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 70, "axisLabel": "sessions" }, "color": { "mode": "fixed", "fixedColor": "#73BF69" } },
+        "overrides": []
+      }
+    },
+
+    {
+      "id": 6000,
+      "title": "ANALYST REFERENCE",
+      "type": "row",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 76 },
+      "collapsed": true,
+      "panels": [
+        {
+          "id": 50,
+          "title": "How to read this dashboard",
+          "type": "text",
+          "gridPos": { "h": 13, "w": 12, "x": 0, "y": 77 },
+          "options": {
+            "mode": "markdown",
+            "content": "## Reading direction\n\n**The risk score runs 0 → 1 where HIGH IS BAD.** It is a fused anomaly score, not a reputation score. 0 means \"behaving exactly like its own learned baseline\".\n\n| Score | Verdict | What the system does |\n|---|---|---|\n| < 0.30 | ALLOW | Nothing. Normal traffic. |\n| 0.30 – 0.50 | WATCH | Observes only. **No traffic is blocked.** |\n| 0.50 – 0.70 | THROTTLE | Rate-limits the device's publishes. |\n| 0.70 – 0.85 | QUARANTINE | Blocks all publishes except to `tmq/quarantine/<device>/#`. |\n| ≥ 0.85 | KICK | Disconnects the device. |\n\nDe-escalation is deliberately sticky: a device must sit below its band (minus a 0.05 margin) for 3 consecutive windows before the level drops. A device stuck at a level after its score fell is **normal**, not a bug.\n\n## The three detectors\n\n- **fsm** — protocol *shape*. Did the device make a state transition it had never made before? Explains *structural* novelty.\n- **drift** — the device vs *its own* statistical baseline. Explains *quantitative* change.\n- **fleet** — the device vs *its peer group*. Explains *relative* change and catches coordinated events.\n\nThe **Suspicious Clients** table shows all three per device. Read the dominant column first — it tells you what kind of anomaly you are looking at before you open anything.\n\n## New devices are capped at WATCH\n\nA device that has not finished its learning period cannot be escalated past WATCH regardless of score (unless it exceeds a hard 0.95 ceiling). If a device you expect to be enforced is stuck at WATCH, check **Learning complete** on its drill-down page first."
+          }
+        },
+        {
+          "id": 51,
+          "title": "Triage playbook",
+          "type": "text",
+          "gridPos": { "h": 13, "w": 12, "x": 12, "y": 77 },
+          "options": {
+            "mode": "markdown",
+            "content": "## When High-Risk Devices > 0\n\n1. Open **Suspicious Clients** and read the dominant detector column.\n2. Click the device name to open the drill-down with the time range preserved.\n3. On the drill-down, compare the **risk chart** against the **verdict timeline** — the verdict should follow the score with hysteresis lag.\n4. Check **Incidents & novel FSM transitions** for the specific transitions the device had never made before. This is your evidence.\n\n## Signature quick-reference\n\n| What you see | Likely meaning |\n|---|---|\n| `new_topic_ratio` + `topic_entropy` both spike, valid credentials | Credential reuse / topic-scope expansion |\n| `drift` high, `fsm` ≈ 0 | Volume or timing change, protocol shape unchanged — often a firmware rollout |\n| `fleet` high across many devices at once | Coordinated event; check for a shared upstream cause before assuming attack |\n| Timing jitter jumps, message rate flat | Possible device impersonation — timing fingerprints are hard to forge |\n| Many short sessions (flapping) | Unstable device, network fault, or repeated takeover attempts |\n\n## When the pipeline itself looks wrong\n\n- **Consumer Lag rising** → verdicts are late; enforcement reacts to stale traffic.\n- **Plugin Events Dropped > 0** → detection is blind to some traffic. Broker is overloaded. Escalate to ops.\n- **Ingest Error Rate rising** → plugin and worker disagree on event schema. This is a software defect, not an attack.\n- **System Status not HEALTHY** → nothing is being scored. Treat all green risk scores as untrustworthy until resolved.\n\n## Known measurement gaps\n\nThe pipeline observes *resolved MQTT semantic events*, not raw packets. It therefore does **not** measure network latency/RTT, IP-level packet rates, or TLS handshake failures. Panels for those would be fabricated, so they are deliberately absent. \"Abnormal Disconnects\" is inferred from very short session duration, not from a dedicated failure counter."
+          }
+        }
+      ]
+    }
+  ]
+}

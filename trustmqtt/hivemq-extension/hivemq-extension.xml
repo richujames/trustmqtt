@@ -1,0 +1,1 @@
+<hivemq-extension><id>trustmqtt</id><name>TrustMQTT</name><version>1.0.0</version><priority>1000</priority><start-priority>1000</start-priority><author>TrustMQTT</author></hivemq-extension>
